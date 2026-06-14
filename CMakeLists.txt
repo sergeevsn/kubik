@@ -4,6 +4,14 @@ project(kubik LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+if(CMAKE_SIZEOF_VOID_P EQUAL 4)
+    message(FATAL_ERROR
+        "Сборка только для 64-bit (x86_64).\n"
+        "32-bit MinGW/MSVC не поддерживается: KFR (FFT) несовместим с mingw32,\n"
+        "а 3D-кубы SEG-Y часто не помещаются в 4 ГБ адресного пространства.\n"
+        "В Qt Creator выберите kit: Desktop Qt 5.15.x MinGW 64-bit или MSVC 2019 64-bit.")
+endif()
+
 option(KUBIK_ENABLE_OPENMP "OpenMP для чтения срезов" ON)
 
 if(KUBIK_ENABLE_OPENMP)

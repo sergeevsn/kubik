@@ -40,7 +40,7 @@
 ## Требования для сборки
 
 - **CMake** ≥ 3.18
-- **Компилятор C++17** (GCC 7+, Clang, MSVC 2017+)
+- **Компилятор C++17, 64-bit** (GCC 7+, Clang, MSVC 2017+)
 - **Qt 5** (модуль Widgets)
 - **Git** — для загрузки зависимостей через CMake FetchContent
 - **OpenMP** (опционально) — ускорение чтения срезов
@@ -85,9 +85,21 @@ cmake -S . -B build -DKUBIK_ENABLE_OPENMP=OFF
 
 ### Windows (Qt Creator)
 
-- Подходит **MinGW GCC 7+** или **MSVC 2017+** (C++17).
-- Если CMake падает на `KFR_ARCH: -`, очистите кэш (**Clear CMake Configuration**) — для Windows архитектура KFR задаётся автоматически (`sse2`).
-- При проблемах с OpenMP добавьте `-DKUBIK_ENABLE_OPENMP=OFF` в аргументы CMake.
+**32-bit MinGW (`mingw730_32`, `msys_pe_32bit`) не поддерживается** — библиотека KFR (FFT) на нём не собирается. Используйте **64-bit kit**:
+
+| Вариант | Kit в Qt Creator | Что установить |
+|---------|------------------|----------------|
+| **MinGW 64-bit** (проще) | `Desktop Qt 5.15.2 MinGW 8.1 64-bit` | Qt 5.15.2 + компонент MinGW 8.1 64-bit |
+| **MSVC 64-bit** (надёжнее для KFR) | `Desktop Qt 5.15.2 MSVC2019 64bit` | Visual Studio 2019/2022 (C++ workload) + Qt под MSVC |
+
+Шаги:
+
+1. **Edit → Preferences → Kits** — убедитесь, что есть 64-bit kit (не `32bit`, не `i686`).
+2. **Projects → Build & Run** — выберите этот kit.
+3. **Build → Clear CMake Configuration**, затем пересоберите.
+4. При проблемах с OpenMP: `-DKUBIK_ENABLE_OPENMP=OFF` в аргументах CMake.
+
+Если установлен только Qt 5.14.2 с `mingw730_32` — доустановите [Qt 5.15.2](https://www.qt.io/download-open-source) с **MinGW 8.1 64-bit** или поставьте MSVC + Qt под MSVC.
 
 ### Тесты
 
