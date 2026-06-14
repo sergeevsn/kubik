@@ -29,6 +29,10 @@ set(KFR_ENABLE_DFT ON CACHE BOOL "" FORCE)
 set(KFR_ENABLE_MULTIARCH OFF CACHE BOOL "" FORCE)
 set(ENABLE_TESTS OFF CACHE BOOL "" FORCE)
 set(ENABLE_EXAMPLES OFF CACHE BOOL "" FORCE)
+# 32-bit MinGW без -msse2: автодетект KFR возвращает "-"
+if(WIN32)
+    set(KFR_ARCH sse2 CACHE STRING "" FORCE)
+endif()
 FetchContent_Declare(
     kfr
     GIT_REPOSITORY https://github.com/kfrlib/kfr.git

@@ -83,6 +83,12 @@ cmake --build build -j$(nproc)
 cmake -S . -B build -DKUBIK_ENABLE_OPENMP=OFF
 ```
 
+### Windows (Qt Creator)
+
+- Подходит **MinGW GCC 7+** или **MSVC 2017+** (C++17).
+- Если CMake падает на `KFR_ARCH: -`, очистите кэш (**Clear CMake Configuration**) — для Windows архитектура KFR задаётся автоматически (`sse2`).
+- При проблемах с OpenMP добавьте `-DKUBIK_ENABLE_OPENMP=OFF` в аргументы CMake.
+
 ### Тесты
 
 ```bash
