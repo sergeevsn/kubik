@@ -112,7 +112,10 @@ void MainWindow::applyDarkTheme() {
     pal.setColor(QPalette::ButtonText, QColor(220, 220, 220));
     pal.setColor(QPalette::Highlight, QColor(0, 120, 215));
     pal.setColor(QPalette::HighlightedText, Qt::white);
-    setPalette(pal);
+    pal.setColor(QPalette::ToolTipBase, QColor(45, 45, 48));
+    pal.setColor(QPalette::ToolTipText, QColor(220, 220, 220));
+    pal.setColor(QPalette::Mid, QColor(70, 70, 74));
+    qApp->setPalette(pal);
 }
 
 void MainWindow::setupUi() {
