@@ -10,6 +10,7 @@
 
 #include "kubik/FftFilter.hpp"
 #include "kubik/Resample.hpp"
+#include "kubik/SystemMemory.hpp"
 
 #include <QButtonGroup>
 #include <QCheckBox>
@@ -92,6 +93,21 @@ void timeCropRows(int t_min_idx, int t_max_idx, const std::vector<int32_t>& vert
     }
 }
 
+bool isSegyFilePath(const QString& path) {
+    const QString suffix = QFileInfo(path).suffix().toLower();
+    return suffix == QStringLiteral("sgy") || suffix == QStringLiteral("segy");
+}
+
+QString formatBytes(std::uint64_t bytes) {
+    if (bytes >= 1024ull * 1024ull * 1024ull) {
+        return QString::number(bytes / (1024.0 * 1024.0 * 1024.0), 'f', 1) + QStringLiteral(" ГБ");
+    }
+    if (bytes >= 1024ull * 1024ull) {
+        return QString::number(bytes / (1024.0 * 1024.0), 'f', 0) + QStringLiteral(" МБ");
+    }
+    return QString::number(bytes / 1024.0, 'f', 0) + QStringLiteral(" КБ");
+}
+
 }  // namespace
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), cube_(std::make_unique<SegyCube>()) {
@@ -127,15 +143,15 @@ void MainWindow::setupUi() {
     };
 
     auto* fileMenu = menuBar()->addMenu(tr("&Файл"));
-    auto* openLazyAct = fileMenu->addAction(tr("Открыть SEG-Y (с диска)..."));
-    openLazyAct->setShortcut(QKeySequence::Open);
-    openLazyAct->setStatusTip(tr("Быстрое открытие: срезы читаются с диска, clip по центральному inline"));
-    connect(openLazyAct, &QAction::triggered, this, &MainWindow::openFileLazy);
-
     auto* openMemAct = fileMenu->addAction(tr("Открыть SEG-Y (в память)..."));
-    openMemAct->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_O));
+    openMemAct->setShortcut(QKeySequence::Open);
     openMemAct->setStatusTip(tr("Загрузить весь куб в RAM: быстрые срезы, особенно Time"));
     connect(openMemAct, &QAction::triggered, this, &MainWindow::openFileInMemory);
+
+    auto* openLazyAct = fileMenu->addAction(tr("Открыть SEG-Y (с диска)..."));
+    openLazyAct->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_O));
+    openLazyAct->setStatusTip(tr("Быстрое открытие: срезы читаются с диска, clip по центральному inline"));
+    connect(openLazyAct, &QAction::triggered, this, &MainWindow::openFileLazy);
 
     auto* saveAsAct = fileMenu->addAction(tr("Сохранить как..."));
     saveAsAct->setShortcut(QKeySequence::SaveAs);
@@ -582,9 +598,36 @@ void MainWindow::showCoordinates() {
     dlg->show();
 }
 
+CubeLoadMode MainWindow::resolveLoadMode(const QString& path, CubeLoadMode requested) const {
+    if (requested == CubeLoadMode::Lazy) {
+        return CubeLoadMode::Lazy;
+    }
+
+    const InMemoryLoadEstimate est = SegyCube::estimateInMemoryLoad(path.toStdString());
+    if (!est.valid) {
+        return CubeLoadMode::Lazy;
+    }
+
+    const std::uint64_t avail = availablePhysicalBytes();
+    if (avail == 0) {
+        return CubeLoadMode::InMemory;
+    }
+
+    const std::uint64_t budget = avail * 3 / 4;
+    if (est.required_bytes > budget) {
+        return CubeLoadMode::Lazy;
+    }
+    return CubeLoadMode::InMemory;
+}
+
 void MainWindow::loadSegy(const QString& path, CubeLoadMode mode) {
+    const CubeLoadMode requestedMode = mode;
+    const CubeLoadMode effectiveMode = resolveLoadMode(path, mode);
+    const bool memoryFallback =
+        requestedMode == CubeLoadMode::InMemory && effectiveMode == CubeLoadMode::Lazy;
+
     CubeLoadOptions options;
-    options.mode = mode;
+    options.mode = effectiveMode;
 
     QProgressDialog progress(this);
     progress.setWindowTitle(tr("Загрузка SEG-Y"));
@@ -691,9 +734,20 @@ void MainWindow::loadSegy(const QString& path, CubeLoadMode mode) {
     updateClipRangeLabel();
     setSliceMode(SliceMode::Inline);
     updateFilterToolState();
-    const QString modeLabel =
-        (cube_->loadMode() == CubeLoadMode::InMemory) ? tr("в памяти") : tr("с диска");
-    statusBar()->showMessage(tr("Загружен %1 [%2]").arg(QFileInfo(path).fileName(), modeLabel), 5000);
+    if (memoryFallback) {
+        const InMemoryLoadEstimate est = SegyCube::estimateInMemoryLoad(path.toStdString());
+        const std::uint64_t avail = availablePhysicalBytes();
+        statusBar()->showMessage(
+            tr("Загружен %1 [с диска] — недостаточно RAM (нужно ~%2, доступно ~%3)")
+                .arg(QFileInfo(path).fileName(), formatBytes(est.required_bytes),
+                     formatBytes(avail)),
+            10000);
+    } else {
+        const QString modeLabel =
+            (cube_->loadMode() == CubeLoadMode::InMemory) ? tr("в памяти") : tr("с диска");
+        statusBar()->showMessage(tr("Загружен %1 [%2]").arg(QFileInfo(path).fileName(), modeLabel),
+                                 5000);
+    }
 }
 
 void MainWindow::setSliceMode(SliceMode mode) {
@@ -1472,17 +1526,24 @@ void MainWindow::onNavigatorTime(int t_idx) {
 }
 
 void MainWindow::dragEnterEvent(QDragEnterEvent* event) {
-    if (event->mimeData()->hasUrls()) {
+    if (!event->mimeData()->hasUrls()) {
+        return;
+    }
+    const QString path = event->mimeData()->urls().first().toLocalFile();
+    if (isSegyFilePath(path)) {
         event->acceptProposedAction();
     }
 }
 
 void MainWindow::dropEvent(QDropEvent* event) {
     const auto urls = event->mimeData()->urls();
-    if (urls.isEmpty()) return;
+    if (urls.isEmpty()) {
+        return;
+    }
     const QString path = urls.first().toLocalFile();
-    if (!path.isEmpty()) {
-        loadSegy(path, CubeLoadMode::Lazy);
+    if (!path.isEmpty() && isSegyFilePath(path)) {
+        event->acceptProposedAction();
+        loadSegy(path, CubeLoadMode::InMemory);
     }
 }
 

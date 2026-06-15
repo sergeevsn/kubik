@@ -209,6 +209,46 @@ void SegyCube::close() {
     loaded_ = false;
 }
 
+InMemoryLoadEstimate SegyCube::estimateInMemoryLoad(const std::string& path) {
+    InMemoryLoadEstimate result;
+    segy_file* fp = segy_open(path.c_str(), "rb");
+    if (!fp) {
+        return result;
+    }
+
+    char binary[SEGY_BINARY_HEADER_SIZE]{};
+    if (segy_binheader(fp, binary) != SEGY_OK) {
+        segy_close(fp);
+        return result;
+    }
+
+    const int n_t = segy_samples(binary);
+    if (n_t <= 0) {
+        segy_close(fp);
+        return result;
+    }
+    if (segy_collect_metadata(fp, -1, -1, -1) != SEGY_OK) {
+        segy_close(fp);
+        return result;
+    }
+
+    const int trace_count = fp->metadata.tracecount;
+    segy_close(fp);
+    if (trace_count <= 0) {
+        return result;
+    }
+
+    result.trace_count = trace_count;
+    result.sample_count = n_t;
+    const std::uint64_t volume_bytes =
+        static_cast<std::uint64_t>(trace_count) * static_cast<std::uint64_t>(n_t) * sizeof(float);
+    const std::uint64_t index_bytes = static_cast<std::uint64_t>(trace_count) * sizeof(int);
+    constexpr std::uint64_t kFixedOverhead = 64u * 1024u * 1024u;
+    result.required_bytes = volume_bytes + volume_bytes / 5 + index_bytes + kFixedOverhead;
+    result.valid = true;
+    return result;
+}
+
 void SegyCube::load(const std::string& path, const CubeLoadOptions& options) {
     close();
     load_mode_ = options.mode;

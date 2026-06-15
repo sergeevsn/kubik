@@ -58,6 +58,7 @@ add_library(kubik_core STATIC
     src/segy/Resample.cpp
     src/dsp/FftFilter.cpp
     src/dsp/FftFilter2D.cpp
+    src/util/SystemMemory.cpp
 )
 target_include_directories(kubik_core PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/include"

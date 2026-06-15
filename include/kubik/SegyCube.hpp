@@ -124,6 +124,14 @@ public:
     LoadCanceled() : std::runtime_error("load canceled") {}
 };
 
+/// Оценка объёма RAM для загрузки куба в память (по binary header и metadata).
+struct InMemoryLoadEstimate {
+    std::uint64_t required_bytes = 0;
+    int trace_count = 0;
+    int sample_count = 0;
+    bool valid = false;
+};
+
 /// 3D post-stack куб из SEG-Y: скан заголовков, индекс IL×XL → trace id, чтение срезов.
 class SegyCube {
 public:
@@ -132,6 +140,8 @@ public:
 
     SegyCube(const SegyCube&) = delete;
     SegyCube& operator=(const SegyCube&) = delete;
+
+    static InMemoryLoadEstimate estimateInMemoryLoad(const std::string& path);
 
     void load(const std::string& path, const CubeLoadOptions& options = {});
     void close();

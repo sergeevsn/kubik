@@ -49,6 +49,7 @@ private:
     void setupUi();
     void applyDarkTheme();
     void loadSegy(const QString& path, CubeLoadMode mode);
+    CubeLoadMode resolveLoadMode(const QString& path, CubeLoadMode requested) const;
     void setSliceMode(SliceMode mode);
     void refreshSlice();
     void updateClipRangeLabel();
