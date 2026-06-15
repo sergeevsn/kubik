@@ -17,8 +17,8 @@ constexpr int kLeftMargin = 64;
 constexpr int kRightMargin = 12;
 constexpr int kTopMargin = 50;
 constexpr int kBottomMargin = 12;
-constexpr int kAxisTitleHeight = 12;
-constexpr int kTickLabelHeight = 11;
+constexpr int kAxisTitleHeight = 10;
+constexpr int kTickLabelHeight = 10;
 constexpr int kTickMarkLen = 3;
 constexpr int kAxisLineGap = 3;
 
@@ -89,6 +89,7 @@ void drawTopTicks(QPainter& p,
         return;
     }
     p.setFont(font);
+    const int label_h = p.fontMetrics().height();
     const int step = chooseIndexTickStep(count, 6);
     const int last_idx = count - 1;
 
@@ -97,16 +98,14 @@ void drawTopTicks(QPainter& p,
         const int x = plot_left + static_cast<int>(rel * static_cast<double>(plot_w - 1) + 0.5);
         p.drawLine(x, axis_y, x, axis_y - kTickMarkLen);
         const QString label = QString::number(labels[static_cast<std::size_t>(idx)]);
-        const QRect text_rect(x - 24, axis_y - kTickLabelHeight - kAxisLineGap - kTickMarkLen, 48,
-                              kTickLabelHeight);
+        const QRect text_rect(x - 24, axis_y - label_h - kAxisLineGap - kTickMarkLen, 48, label_h);
         p.drawText(text_rect, Qt::AlignHCenter | Qt::AlignBottom, label);
     }
     if (last_idx % step != 0) {
         const int x = plot_right - 1;
         p.drawLine(x, axis_y, x, axis_y - kTickMarkLen);
         const QString label = QString::number(labels[static_cast<std::size_t>(last_idx)]);
-        const QRect text_rect(x - 24, axis_y - kTickLabelHeight - kAxisLineGap - kTickMarkLen, 48,
-                              kTickLabelHeight);
+        const QRect text_rect(x - 24, axis_y - label_h - kAxisLineGap - kTickMarkLen, 48, label_h);
         p.drawText(text_rect, Qt::AlignHCenter | Qt::AlignBottom, label);
     }
 }
@@ -463,7 +462,7 @@ void SliceView::paintEvent(QPaintEvent* event) {
 
     p.setPen(palette().color(QPalette::Text));
     QFont axisFont = p.font();
-    axisFont.setPointSize(7);
+    axisFont.setPointSize(6);
     QFont titleFont = axisFont;
     titleFont.setBold(true);
 
