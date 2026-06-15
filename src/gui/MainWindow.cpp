@@ -39,6 +39,7 @@
 #include <QVBoxLayout>
 #include <QApplication>
 #include <QElapsedTimer>
+#include <QDebug>
 
 #include <segyio/segy.h>
 
@@ -157,6 +158,11 @@ void MainWindow::setupUi() {
     auto* saveAsAct = fileMenu->addAction(tr("Сохранить как..."));
     saveAsAct->setShortcut(QKeySequence::SaveAs);
     connect(saveAsAct, &QAction::triggered, this, &MainWindow::saveFileAs);
+
+    fileMenu->addSeparator();
+    auto* exitAct = fileMenu->addAction(tr("Выход"));
+    exitAct->setShortcut(QKeySequence::Quit);
+    connect(exitAct, &QAction::triggered, qApp, &QApplication::quit);
 
     auto* infoMenu = menuBar()->addMenu(tr("&Инфо"));
     auto* headersAct = infoMenu->addAction(tr("Заголовки SEG-Y..."));
@@ -706,6 +712,13 @@ void MainWindow::loadSegy(const QString& path, CubeLoadMode mode) {
     CubeLoadOptions options;
     options.mode = effectiveMode;
 
+    if (memoryFallback) {
+        qDebug().noquote() << "[kubik load] недостаточно RAM, переключение на режим «с диска»:"
+                           << path;
+    }
+    qDebug().noquote() << "[kubik load] файл:" << path
+                       << "режим:" << (effectiveMode == CubeLoadMode::InMemory ? "в память" : "с диска");
+
     QProgressDialog progress(this);
     progress.setWindowTitle(tr("Загрузка SEG-Y"));
     progress.setLabelText(tr("Сканирование заголовков..."));
@@ -731,6 +744,12 @@ void MainWindow::loadSegy(const QString& path, CubeLoadMode mode) {
         case CubeLoadProgress::Stage::BuildStats:
             stage = tr("Статистика амплитуд");
             break;
+        }
+        if (info.current == 0 || info.current >= info.total) {
+            qDebug().noquote() << QStringLiteral("[kubik load] прогресс: %1 %2 / %3")
+                                      .arg(stage)
+                                      .arg(info.current)
+                                      .arg(info.total);
         }
         progress.setMaximum(std::max(1, info.total));
         progress.setValue(std::min(info.current, info.total));
