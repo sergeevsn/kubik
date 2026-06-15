@@ -39,7 +39,6 @@
 #include <QVBoxLayout>
 #include <QApplication>
 #include <QElapsedTimer>
-#include <QDebug>
 
 #include <segyio/segy.h>
 
@@ -108,18 +107,6 @@ QString formatBytes(std::uint64_t bytes) {
         return QString::number(bytes / (1024.0 * 1024.0), 'f', 0) + QStringLiteral(" МБ");
     }
     return QString::number(bytes / 1024.0, 'f', 0) + QStringLiteral(" КБ");
-}
-
-const char* sliceModeDebugName(SliceMode mode) {
-    switch (mode) {
-    case SliceMode::Inline:
-        return "inline";
-    case SliceMode::Crossline:
-        return "crossline";
-    case SliceMode::Time:
-        return "time";
-    }
-    return "?";
 }
 
 }  // namespace
@@ -724,15 +711,6 @@ void MainWindow::loadSegy(const QString& path, CubeLoadMode mode) {
     CubeLoadOptions options;
     options.mode = effectiveMode;
 
-    if (memoryFallback) {
-        qDebug().noquote() << "[kubik load] insufficient RAM, falling back to lazy (from disk):"
-                           << path;
-    }
-    qDebug().noquote() << "[kubik load] file:" << path
-                       << "mode:"
-                       << (effectiveMode == CubeLoadMode::InMemory ? "in memory"
-                                                                   : "lazy (from disk)");
-
     QProgressDialog progress(this);
     progress.setWindowTitle(tr("Загрузка SEG-Y"));
     progress.setLabelText(tr("Сканирование заголовков..."));
@@ -748,26 +726,16 @@ void MainWindow::loadSegy(const QString& path, CubeLoadMode mode) {
 
     options.progress = [&](const CubeLoadProgress& info) -> bool {
         QString stage;
-        const char* stage_debug = "";
         switch (info.stage) {
         case CubeLoadProgress::Stage::ScanHeaders:
             stage = tr("Сканирование заголовков");
-            stage_debug = "scanning headers";
             break;
         case CubeLoadProgress::Stage::LoadVolume:
             stage = tr("Загрузка куба в память");
-            stage_debug = "loading volume to memory";
             break;
         case CubeLoadProgress::Stage::BuildStats:
             stage = tr("Статистика амплитуд");
-            stage_debug = "building amplitude stats";
             break;
-        }
-        if (info.current == 0 || info.current >= info.total) {
-            qDebug().noquote() << QStringLiteral("[kubik load] progress: %1 %2 / %3")
-                                      .arg(QString::fromLatin1(stage_debug))
-                                      .arg(info.current)
-                                      .arg(info.total);
         }
         progress.setMaximum(std::max(1, info.total));
         progress.setValue(std::min(info.current, info.total));
@@ -791,15 +759,6 @@ void MainWindow::loadSegy(const QString& path, CubeLoadMode mode) {
     progress.setValue(progress.maximum());
     progress.close();
 
-    QElapsedTimer ui_timer;
-    ui_timer.start();
-    auto uiStep = [&](const char* step) {
-        qDebug().noquote() << QStringLiteral("[kubik ui] %1 (%2 ms)")
-                                  .arg(QString::fromLatin1(step))
-                                  .arg(ui_timer.elapsed());
-    };
-    uiStep("post-load setup started");
-
     const auto& g = cube_->geometry();
     il_idx_ = g.n_il / 2;
     xl_idx_ = g.n_xl / 2;
@@ -807,7 +766,6 @@ void MainWindow::loadSegy(const QString& path, CubeLoadMode mode) {
 
     navigator_->setCubeSize(g.n_il, g.n_xl, g.n_t);
     navigator_->setSlicePositions(il_idx_, xl_idx_, t_idx_);
-    uiStep("navigator updated");
 
     slice_spin_->setEnabled(true);
     slice_spin_->blockSignals(true);
@@ -822,7 +780,6 @@ void MainWindow::loadSegy(const QString& path, CubeLoadMode mode) {
     updateSliceSpinbox();
     updateCropSpinboxes();
     updateResampleSpinboxes();
-    uiStep("spinboxes updated");
 
     slice_scroll_->setValue(currentSliceIndex());
     slice_spin_->setCurrentIndex(currentSliceIndex());
@@ -864,10 +821,8 @@ void MainWindow::loadSegy(const QString& path, CubeLoadMode mode) {
     updateFootprintCubeFilterLabel();
     updateStatusBase();
     updateClipRangeLabel();
-    uiStep("labels updated");
     setSliceMode(SliceMode::Inline);
     updateFilterToolState();
-    uiStep("first slice displayed");
     if (memoryFallback) {
         const InMemoryLoadEstimate est = SegyCube::estimateInMemoryLoad(path.toStdString());
         const std::uint64_t avail = availablePhysicalBytes();
@@ -987,9 +942,6 @@ void MainWindow::updateClipRangeLabel() {
 void MainWindow::refreshSlice() {
     if (!cube_->isLoaded() || !slice_view_) return;
 
-    QElapsedTimer timer;
-    timer.start();
-
     const auto& g = cube_->geometry();
     const ResampleParams resample = currentResampleParams();
     const CropBounds crop = fullCropBounds();
@@ -1016,7 +968,6 @@ void MainWindow::refreshSlice() {
         vert_is_time = false;
         break;
     }
-    const qint64 read_ms = timer.elapsed();
 
     applyCubeFftFilter(data, w, h, vert_step_ms);
     applyCubeFft2DFilter(data, w, h, horiz_labels, vert_labels);
@@ -1032,14 +983,6 @@ void MainWindow::refreshSlice() {
     applyCropMask(w, h, horiz_labels, vert_labels, vert_is_time);
     updateClipRangeLabel();
     updateStatusBase();
-
-    qDebug().noquote() << QStringLiteral("[kubik ui] refreshSlice %1 idx=%2 size=%3x%4 read=%5 ms total=%6 ms")
-                              .arg(QString::fromLatin1(sliceModeDebugName(mode_)))
-                              .arg(currentSliceIndex())
-                              .arg(w)
-                              .arg(h)
-                              .arg(read_ms)
-                              .arg(timer.elapsed());
 }
 
 CropBounds MainWindow::fullCropBounds() const {
