@@ -485,26 +485,25 @@ void SegyCube::load(const std::string& path, const CubeLoadOptions& options) {
     loaded_ = true;
 
     switch (options.mode) {
-    case CubeLoadMode::Lazy: {
-        if (options.progress) {
-            CubeLoadProgress info;
-            info.stage = CubeLoadProgress::Stage::BuildStats;
-            info.current = 0;
-            info.total = 1;
-            if (!options.progress(info)) {
-                close();
-                throw LoadCanceled();
-            }
-        }
-        const int il_idx = std::max(0, geom_.n_il / 2);
-        buildAmplitudeStatsFromInline(il_idx);
+    case CubeLoadMode::Lazy:
         break;
-    }
     case CubeLoadMode::InMemory:
         loadVolumeToMemory(options.progress);
-        buildAmplitudeStatsFromVolume();
         break;
     }
+
+    if (options.progress) {
+        CubeLoadProgress info;
+        info.stage = CubeLoadProgress::Stage::BuildStats;
+        info.current = 0;
+        info.total = 1;
+        if (!options.progress(info)) {
+            close();
+            throw LoadCanceled();
+        }
+    }
+    const int il_idx = std::max(0, geom_.n_il / 2);
+    buildAmplitudeStatsFromInline(il_idx);
 }
 
 std::size_t SegyCube::volumeOffset(int il_idx, int xl_idx, int t_idx) const {
@@ -629,13 +628,6 @@ void SegyCube::loadVolumeToMemory(const CubeLoadProgressCallback& progress) {
             volume_.clear();
             throw LoadCanceled();
         }
-        info.stage = CubeLoadProgress::Stage::BuildStats;
-        info.current = 0;
-        info.total = 1;
-        if (!progress(info)) {
-            volume_.clear();
-            throw LoadCanceled();
-        }
     }
 }
 
@@ -649,21 +641,6 @@ void SegyCube::buildAmplitudeStatsFromInline(int il_idx) {
     const std::vector<float> slice = readInlineSlice(il_idx);
     amplitudes_sorted_.reserve(slice.size());
     for (float v : slice) {
-        if (std::isfinite(v)) {
-            amplitudes_sorted_.push_back(v);
-        }
-    }
-    std::sort(amplitudes_sorted_.begin(), amplitudes_sorted_.end());
-}
-
-void SegyCube::buildAmplitudeStatsFromVolume() {
-    amplitudes_sorted_.clear();
-    if (volume_.empty()) {
-        return;
-    }
-
-    amplitudes_sorted_.reserve(volume_.size());
-    for (float v : volume_) {
         if (std::isfinite(v)) {
             amplitudes_sorted_.push_back(v);
         }

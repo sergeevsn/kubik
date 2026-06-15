@@ -179,7 +179,7 @@ public:
     std::vector<float> readTraceProcessed(int il_idx, int xl_idx, const CropBounds& crop,
                                           const ResampleParams& resample, float& out_dt_ms) const;
 
-    /// Перцентиль амплитуды (0…100): в RAM — по всему кубу, с диска — по центральному inline.
+    /// Перцентиль амплитуды (0…100) по центральному inline.
     float amplitudePercentile(float percentile) const;
     /// clip=99 → [p0.5, p99.5]; clip=95 → [p2.5, p97.5]; clip=1 → [p49.5, p50.5].
     void clipRange(float clip_percent, float& out_vmin, float& out_vmax) const;
@@ -200,7 +200,6 @@ private:
     std::vector<float> readTraceAt(int il_idx, int xl_idx) const;
     void loadVolumeToMemory(const CubeLoadProgressCallback& progress);
     void buildAmplitudeStatsFromInline(int il_idx);
-    void buildAmplitudeStatsFromVolume();
 
     std::string path_;
     CubeGeometry geom_{};
