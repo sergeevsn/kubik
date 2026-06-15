@@ -12,10 +12,14 @@
 
 namespace {
 
-constexpr int kLeftMargin = 56;
+constexpr int kLeftMargin = 64;
 constexpr int kRightMargin = 12;
-constexpr int kTopMargin = 36;
+constexpr int kTopMargin = 50;
 constexpr int kBottomMargin = 12;
+constexpr int kAxisTitleHeight = 12;
+constexpr int kTickLabelHeight = 11;
+constexpr int kTickMarkLen = 3;
+constexpr int kAxisLineGap = 3;
 
 QString horizAxisLabel(kubik::SliceMode mode) {
     switch (mode) {
@@ -90,16 +94,18 @@ void drawTopTicks(QPainter& p,
     for (int idx = 0; idx <= last_idx; idx += step) {
         const double rel = last_idx > 0 ? static_cast<double>(idx) / static_cast<double>(last_idx) : 0.0;
         const int x = plot_left + static_cast<int>(rel * static_cast<double>(plot_w - 1) + 0.5);
-        p.drawLine(x, axis_y, x, axis_y - 4);
+        p.drawLine(x, axis_y, x, axis_y - kTickMarkLen);
         const QString label = QString::number(labels[static_cast<std::size_t>(idx)]);
-        const QRect text_rect(x - 28, axis_y - 18, 56, 14);
+        const QRect text_rect(x - 24, axis_y - kTickLabelHeight - kAxisLineGap - kTickMarkLen, 48,
+                              kTickLabelHeight);
         p.drawText(text_rect, Qt::AlignHCenter | Qt::AlignBottom, label);
     }
     if (last_idx % step != 0) {
         const int x = plot_right - 1;
-        p.drawLine(x, axis_y, x, axis_y - 4);
+        p.drawLine(x, axis_y, x, axis_y - kTickMarkLen);
         const QString label = QString::number(labels[static_cast<std::size_t>(last_idx)]);
-        const QRect text_rect(x - 28, axis_y - 18, 56, 14);
+        const QRect text_rect(x - 24, axis_y - kTickLabelHeight - kAxisLineGap - kTickMarkLen, 48,
+                              kTickLabelHeight);
         p.drawText(text_rect, Qt::AlignHCenter | Qt::AlignBottom, label);
     }
 }
@@ -131,16 +137,18 @@ void drawLeftTimeTicks(QPainter& p,
             continue;
         }
         const int y = plot_top + static_cast<int>(rel * static_cast<double>(plot_h - 1) + 0.5);
-        p.drawLine(axis_x, y, axis_x - 4, y);
+        p.drawLine(axis_x, y, axis_x - kTickMarkLen, y);
         const QString label = QString::number(t_ms);
-        const QRect text_rect(0, y - 7, axis_x - 6, 14);
+        const QRect text_rect(0, y - kTickLabelHeight / 2, axis_x - kAxisLineGap - kTickMarkLen,
+                              kTickLabelHeight);
         p.drawText(text_rect, Qt::AlignRight | Qt::AlignVCenter, label);
     }
     if (last_ms % step_ms != 0) {
         const int y = plot_bottom - 1;
-        p.drawLine(axis_x, y, axis_x - 4, y);
+        p.drawLine(axis_x, y, axis_x - kTickMarkLen, y);
         const QString label = QString::number(last_ms);
-        const QRect text_rect(0, y - 7, axis_x - 6, 14);
+        const QRect text_rect(0, y - kTickLabelHeight / 2, axis_x - kAxisLineGap - kTickMarkLen,
+                              kTickLabelHeight);
         p.drawText(text_rect, Qt::AlignRight | Qt::AlignVCenter, label);
     }
 }
@@ -171,16 +179,18 @@ void drawLeftIndexTicks(QPainter& p,
 
     for (int idx = 0; idx <= last_idx; idx += step) {
         const int y = indexTickY(idx, last_idx, plot_top, plot_bottom, plot_h, origin_at_bottom);
-        p.drawLine(axis_x, y, axis_x - 4, y);
+        p.drawLine(axis_x, y, axis_x - kTickMarkLen, y);
         const QString label = QString::number(labels[static_cast<std::size_t>(idx)]);
-        const QRect text_rect(0, y - 7, axis_x - 6, 14);
+        const QRect text_rect(0, y - kTickLabelHeight / 2, axis_x - kAxisLineGap - kTickMarkLen,
+                              kTickLabelHeight);
         p.drawText(text_rect, Qt::AlignRight | Qt::AlignVCenter, label);
     }
     if (last_idx % step != 0) {
         const int y = indexTickY(last_idx, last_idx, plot_top, plot_bottom, plot_h, origin_at_bottom);
-        p.drawLine(axis_x, y, axis_x - 4, y);
+        p.drawLine(axis_x, y, axis_x - kTickMarkLen, y);
         const QString label = QString::number(labels[static_cast<std::size_t>(last_idx)]);
-        const QRect text_rect(0, y - 7, axis_x - 6, 14);
+        const QRect text_rect(0, y - kTickLabelHeight / 2, axis_x - kAxisLineGap - kTickMarkLen,
+                              kTickLabelHeight);
         p.drawText(text_rect, Qt::AlignRight | Qt::AlignVCenter, label);
     }
 }
@@ -398,12 +408,12 @@ void SliceView::paintEvent(QPaintEvent* event) {
 
     p.setPen(palette().color(QPalette::Text));
     QFont axisFont = p.font();
-    axisFont.setPointSize(8);
+    axisFont.setPointSize(7);
     QFont titleFont = axisFont;
     titleFont.setBold(true);
 
-    const int axis_top_y = plot_top - 6;
-    const int axis_left_x = plot_left - 6;
+    const int axis_top_y = plot_top - kAxisLineGap;
+    const int axis_left_x = plot_left - kAxisLineGap;
 
     p.drawLine(plot_left, axis_top_y, plot_right, axis_top_y);
     p.drawLine(axis_left_x, plot_top, axis_left_x, plot_bottom);
@@ -435,12 +445,13 @@ void SliceView::paintEvent(QPaintEvent* event) {
     }
 
     p.setFont(titleFont);
-    p.drawText(QRect(plot_left, 2, plot_w, 16), Qt::AlignHCenter | Qt::AlignVCenter,
+    p.drawText(QRect(plot_left, 4, plot_w, kAxisTitleHeight), Qt::AlignHCenter | Qt::AlignVCenter,
                horizAxisLabel(mode_));
     p.save();
-    p.translate(10, plot_top + plot_h / 2);
+    p.translate(14, plot_top + plot_h / 2);
     p.rotate(-90.0);
-    p.drawText(QRect(-60, -10, 120, 20), Qt::AlignCenter, vertAxisLabel(mode_));
+    p.drawText(QRect(-48, -kAxisTitleHeight / 2, 96, kAxisTitleHeight), Qt::AlignCenter,
+               vertAxisLabel(mode_));
     p.restore();
 
     if (selection_mode_ && selecting_) {
