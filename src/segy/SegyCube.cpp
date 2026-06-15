@@ -11,6 +11,7 @@
 #include <limits>
 #include <set>
 #include <stdexcept>
+#include <utility>
 
 #include <segyio/segy.h>
 
@@ -465,6 +466,57 @@ void SegyCube::load(const std::string& path, const CubeLoadOptions& options) {
     }
     if (!reportScanProgress(n_traces)) {
         throw LoadCanceled();
+    }
+
+    {
+        int valid_count = 0;
+        int32_t min_il_val = INT_MAX;
+        int32_t max_il_val = INT_MIN;
+        int32_t min_xl_val = INT_MAX;
+        int32_t max_xl_val = INT_MIN;
+        std::set<std::pair<int32_t, int32_t>> il_xl_pairs;
+
+        for (const TraceMeta& tm : meta) {
+            if (!tm.ok) {
+                continue;
+            }
+            ++valid_count;
+            min_il_val = std::min(min_il_val, tm.il);
+            max_il_val = std::max(max_il_val, tm.il);
+            min_xl_val = std::min(min_xl_val, tm.xl);
+            max_xl_val = std::max(max_xl_val, tm.xl);
+            il_xl_pairs.insert({tm.il, tm.xl});
+        }
+
+        if (valid_count == 0) {
+            throw std::runtime_error(
+                u8"SEG-Y: не удалось прочитать INLINE/CROSSLINE ни на одной трассе");
+        }
+        if (min_il_val == 0 && max_il_val == 0) {
+            throw std::runtime_error(
+                u8"SEG-Y: все значения INLINE равны нулю — куб не может быть открыт");
+        }
+        if (min_xl_val == 0 && max_xl_val == 0) {
+            throw std::runtime_error(
+                u8"SEG-Y: все значения CROSSLINE равны нулю — куб не может быть открыт");
+        }
+        if (min_il_val == max_il_val) {
+            throw std::runtime_error(
+                u8"SEG-Y: все значения INLINE одинаковы (" + std::to_string(min_il_val) +
+                u8") — куб не может быть открыт");
+        }
+        if (min_xl_val == max_xl_val) {
+            throw std::runtime_error(
+                u8"SEG-Y: все значения CROSSLINE одинаковы (" + std::to_string(min_xl_val) +
+                u8") — куб не может быть открыт");
+        }
+        if (il_xl_pairs.size() < static_cast<std::size_t>(valid_count)) {
+            throw std::runtime_error(
+                u8"SEG-Y: число уникальных пар INLINE–CROSSLINE (" +
+                std::to_string(il_xl_pairs.size()) + u8") меньше числа трасс (" +
+                std::to_string(valid_count) +
+                u8"); вероятно prestack, а не post-stack куб");
+        }
     }
 
     if (min_il > max_il || min_xl > max_xl) {
