@@ -1,5 +1,5 @@
 #include "FftFilter2DDialog.hpp"
-#include "DiscreteValueSpinBox.hpp"
+#include "SpinBoxFix.hpp"
 #include "kubik/AmplitudeClip.hpp"
 #include "SlicePreviewWidget.hpp"
 #include "Spectrum2DPlotWidget.hpp"
@@ -65,7 +65,7 @@ void FftFilter2DDialog::setupUi() {
     spectrum_clip_spin_->setValue(static_cast<int>(spectrum_clip_percent_));
     spectrum_clip_spin_->setSuffix(QStringLiteral("%"));
     spectrum_clip_spin_->setToolTip(tr("Clip FK: 99 → [p0.5, p99.5], 1 → [p49.5, p50.5]"));
-    ensureSpinBoxButtonSpace(spectrum_clip_spin_);
+    setupSpinBox(spectrum_clip_spin_);
     spectrum_clip_range_label_ = new QLabel(this);
     spectrum_clip_range_label_->setMinimumWidth(160);
     spec_clip_row->addWidget(new QLabel(tr("Clip FK:"), this));
@@ -116,7 +116,7 @@ void FftFilter2DDialog::setupUi() {
           static_cast<QAbstractSpinBox*>(k_cut_xl_spin_),
           static_cast<QAbstractSpinBox*>(k_pass_spin_),
           static_cast<QAbstractSpinBox*>(k_smooth_spin_)}) {
-        ensureSpinBoxButtonSpace(spin);
+        setupSpinBox(spin);
     }
 
     grid->addWidget(new QLabel(tr("Режим"), controls), 0, 0);
@@ -159,7 +159,7 @@ void FftFilter2DDialog::setupUi() {
     preview_clip_spin_->setSuffix(QStringLiteral("%"));
     preview_clip_spin_->setToolTip(
         tr("Clip по до/после; разница = clipped(после) − clipped(до), отображение ±span"));
-    ensureSpinBoxButtonSpace(preview_clip_spin_);
+    setupSpinBox(preview_clip_spin_);
     preview_clip_range_label_ = new QLabel(previews);
     preview_clip_range_label_->setMinimumWidth(160);
     prev_clip_row->addWidget(new QLabel(tr("Clip:"), previews));

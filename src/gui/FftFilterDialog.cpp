@@ -1,5 +1,5 @@
 #include "FftFilterDialog.hpp"
-#include "DiscreteValueSpinBox.hpp"
+#include "SpinBoxFix.hpp"
 #include "SlicePreviewWidget.hpp"
 #include "SpectrumPlotWidget.hpp"
 
@@ -79,7 +79,7 @@ void FftFilterDialog::setupUi() {
     for (QAbstractSpinBox* spin : {static_cast<QAbstractSpinBox*>(f_low_spin_),
                                     static_cast<QAbstractSpinBox*>(f_high_spin_),
                                     static_cast<QAbstractSpinBox*>(order_spin_)}) {
-        ensureSpinBoxButtonSpace(spin);
+        setupSpinBox(spin);
     }
 
     grid->addWidget(new QLabel(tr("Тип"), controls), 0, 0);

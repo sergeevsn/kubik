@@ -4,6 +4,7 @@
 #include "FftFilter2DDialog.hpp"
 #include "FftFilterDialog.hpp"
 #include "DiscreteValueSpinBox.hpp"
+#include "SpinBoxFix.hpp"
 #include "SegyHeaderDialog.hpp"
 #include "SurveyCoordinatesDialog.hpp"
 
@@ -121,7 +122,7 @@ void MainWindow::applyDarkTheme() {
 void MainWindow::setupUi() {
     const auto setupSpin = [](QAbstractSpinBox* spin) {
         if (spin) {
-            ensureSpinBoxButtonSpace(spin);
+            setupSpinBox(spin);
         }
     };
 
@@ -292,8 +293,6 @@ void MainWindow::setupUi() {
         max_spin = new DiscreteValueSpinBox(crop_body);
         setupSpin(min_spin);
         setupSpin(max_spin);
-        min_spin->setMinimumWidth(112);
-        max_spin->setMinimumWidth(112);
         min_spin->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
         max_spin->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
         min_spin->setEnabled(false);
