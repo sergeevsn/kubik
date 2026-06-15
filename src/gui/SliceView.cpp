@@ -6,6 +6,8 @@
 #include <QPainter>
 #include <QResizeEvent>
 #include <QWheelEvent>
+#include <QDebug>
+#include <QElapsedTimer>
 
 #include <algorithm>
 #include <cmath>
@@ -392,6 +394,9 @@ bool SliceView::mapPixelToIndices(int px, int py, int& out_h, int& out_v) const 
 
 void SliceView::paintEvent(QPaintEvent* event) {
     Q_UNUSED(event);
+    QElapsedTimer paint_timer;
+    paint_timer.start();
+
     QPainter p(this);
     p.fillRect(rect(), palette().brush(QPalette::Window));
 
@@ -513,6 +518,16 @@ void SliceView::paintEvent(QPaintEvent* event) {
         p.setPen(QPen(QColor(255, 220, 80), 1.5, Qt::DashLine));
         p.setBrush(QColor(255, 220, 80, 40));
         p.drawRect(sel);
+    }
+
+    const qint64 paint_ms = paint_timer.elapsed();
+    if (width_ > 0 && height_ > 0 && !data_.empty()) {
+        qDebug().noquote() << QStringLiteral("[kubik ui] SliceView paint %1x%2 plot=%3x%4 %5 ms")
+                                  .arg(width_)
+                                  .arg(height_)
+                                  .arg(plot_w)
+                                  .arg(plot_h)
+                                  .arg(paint_ms);
     }
 }
 

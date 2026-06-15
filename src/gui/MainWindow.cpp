@@ -110,6 +110,18 @@ QString formatBytes(std::uint64_t bytes) {
     return QString::number(bytes / 1024.0, 'f', 0) + QStringLiteral(" КБ");
 }
 
+const char* sliceModeDebugName(SliceMode mode) {
+    switch (mode) {
+    case SliceMode::Inline:
+        return "inline";
+    case SliceMode::Crossline:
+        return "crossline";
+    case SliceMode::Time:
+        return "time";
+    }
+    return "?";
+}
+
 }  // namespace
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), cube_(std::make_unique<SegyCube>()) {
@@ -779,6 +791,15 @@ void MainWindow::loadSegy(const QString& path, CubeLoadMode mode) {
     progress.setValue(progress.maximum());
     progress.close();
 
+    QElapsedTimer ui_timer;
+    ui_timer.start();
+    auto uiStep = [&](const char* step) {
+        qDebug().noquote() << QStringLiteral("[kubik ui] %1 (%2 ms)")
+                                  .arg(QString::fromLatin1(step))
+                                  .arg(ui_timer.elapsed());
+    };
+    uiStep("post-load setup started");
+
     const auto& g = cube_->geometry();
     il_idx_ = g.n_il / 2;
     xl_idx_ = g.n_xl / 2;
@@ -786,18 +807,27 @@ void MainWindow::loadSegy(const QString& path, CubeLoadMode mode) {
 
     navigator_->setCubeSize(g.n_il, g.n_xl, g.n_t);
     navigator_->setSlicePositions(il_idx_, xl_idx_, t_idx_);
+    uiStep("navigator updated");
+
+    slice_spin_->setEnabled(true);
+    slice_spin_->blockSignals(true);
+    slice_scroll_->blockSignals(true);
 
     slice_scroll_->setEnabled(maxSliceIndex() > 0);
     slice_scroll_->setMinimum(0);
     slice_scroll_->setMaximum(maxSliceIndex());
-    slice_scroll_->setValue(currentSliceIndex());
 
-    slice_spin_->setEnabled(true);
-    updateSliceSpinbox();
     resetCropBounds();
-    updateCropSpinboxes();
     resetResampleSpinboxes();
+    updateSliceSpinbox();
+    updateCropSpinboxes();
     updateResampleSpinboxes();
+    uiStep("spinboxes updated");
+
+    slice_scroll_->setValue(currentSliceIndex());
+    slice_spin_->setCurrentIndex(currentSliceIndex());
+    slice_spin_->blockSignals(false);
+    slice_scroll_->blockSignals(false);
 
     crop_enabled_ = true;
     resample_enabled_ = true;
@@ -834,8 +864,10 @@ void MainWindow::loadSegy(const QString& path, CubeLoadMode mode) {
     updateFootprintCubeFilterLabel();
     updateStatusBase();
     updateClipRangeLabel();
+    uiStep("labels updated");
     setSliceMode(SliceMode::Inline);
     updateFilterToolState();
+    uiStep("first slice displayed");
     if (memoryFallback) {
         const InMemoryLoadEstimate est = SegyCube::estimateInMemoryLoad(path.toStdString());
         const std::uint64_t avail = availablePhysicalBytes();
@@ -955,6 +987,9 @@ void MainWindow::updateClipRangeLabel() {
 void MainWindow::refreshSlice() {
     if (!cube_->isLoaded() || !slice_view_) return;
 
+    QElapsedTimer timer;
+    timer.start();
+
     const auto& g = cube_->geometry();
     const ResampleParams resample = currentResampleParams();
     const CropBounds crop = fullCropBounds();
@@ -981,6 +1016,7 @@ void MainWindow::refreshSlice() {
         vert_is_time = false;
         break;
     }
+    const qint64 read_ms = timer.elapsed();
 
     applyCubeFftFilter(data, w, h, vert_step_ms);
     applyCubeFft2DFilter(data, w, h, horiz_labels, vert_labels);
@@ -996,6 +1032,14 @@ void MainWindow::refreshSlice() {
     applyCropMask(w, h, horiz_labels, vert_labels, vert_is_time);
     updateClipRangeLabel();
     updateStatusBase();
+
+    qDebug().noquote() << QStringLiteral("[kubik ui] refreshSlice %1 idx=%2 size=%3x%4 read=%5 ms total=%6 ms")
+                              .arg(QString::fromLatin1(sliceModeDebugName(mode_)))
+                              .arg(currentSliceIndex())
+                              .arg(w)
+                              .arg(h)
+                              .arg(read_ms)
+                              .arg(timer.elapsed());
 }
 
 CropBounds MainWindow::fullCropBounds() const {
