@@ -2,10 +2,14 @@
 
 #include <QAbstractSpinBox>
 #include <QSize>
+#include <QShowEvent>
 #include <QTimer>
 #include <QVector>
 
 namespace kubik {
+
+/// Резервирует место под стрелки (на Windows line edit иначе перекрывает hit-test).
+void ensureSpinBoxButtonSpace(QAbstractSpinBox* spin);
 
 /// Спинбокс по дискретному списку значений (IL, XL, время в мс).
 class DiscreteValueSpinBox : public QAbstractSpinBox {
@@ -26,6 +30,7 @@ protected:
     QValidator::State validate(QString& input, int& pos) const override;
     void fixup(QString& input) const override;
     QSize minimumSizeHint() const override;
+    void showEvent(QShowEvent* event) override;
 #if QT_VERSION >= QT_VERSION_CHECK(5, 15, 0)
     StepEnabled stepEnabled() const override;
 #endif

@@ -119,6 +119,12 @@ void MainWindow::applyDarkTheme() {
 }
 
 void MainWindow::setupUi() {
+    const auto setupSpin = [](QAbstractSpinBox* spin) {
+        if (spin) {
+            ensureSpinBoxButtonSpace(spin);
+        }
+    };
+
     auto* fileMenu = menuBar()->addMenu(tr("&Файл"));
     auto* openLazyAct = fileMenu->addAction(tr("Открыть SEG-Y (с диска)..."));
     openLazyAct->setShortcut(QKeySequence::Open);
@@ -205,6 +211,7 @@ void MainWindow::setupUi() {
     clip_spin_->setValue(static_cast<int>(clip_percent_));
     clip_spin_->setSuffix(QStringLiteral("%"));
     clip_spin_->setToolTip(tr("Clip: ширина диапазона в %% распределения; 99 → [p0.5, p99.5], 1 → узкий центр"));
+    setupSpin(clip_spin_);
     clip_range_label_ = new QLabel(central);
     clip_range_label_->setMinimumWidth(140);
     connect(clip_spin_, qOverload<int>(&QSpinBox::valueChanged), this, [this](int v) {
@@ -249,6 +256,7 @@ void MainWindow::setupUi() {
 
     slice_spin_ = new DiscreteValueSpinBox(central);
     slice_spin_->setEnabled(false);
+    setupSpin(slice_spin_);
     connect(slice_spin_, &DiscreteValueSpinBox::currentIndexChanged, this, &MainWindow::onSliceSlider);
     rightCol->addWidget(new QLabel(tr("Срез:"), central));
     rightCol->addWidget(slice_spin_);
@@ -282,6 +290,8 @@ void MainWindow::setupUi() {
         crop_grid->addWidget(new QLabel(label, crop_body), row, 0);
         min_spin = new DiscreteValueSpinBox(crop_body);
         max_spin = new DiscreteValueSpinBox(crop_body);
+        setupSpin(min_spin);
+        setupSpin(max_spin);
         min_spin->setMinimumWidth(112);
         max_spin->setMinimumWidth(112);
         min_spin->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
@@ -320,6 +330,7 @@ void MainWindow::setupUi() {
     auto* time_box = new QGroupBox(tr("Time"), resample_body);
     auto* time_form = new QGridLayout(time_box);
     resample_dt_spin_ = new QDoubleSpinBox(time_box);
+    setupSpin(resample_dt_spin_);
     resample_dt_spin_->setDecimals(2);
     resample_dt_spin_->setRange(0.01, 10000.0);
     resample_dt_spin_->setSuffix(tr(" ms"));
@@ -334,6 +345,7 @@ void MainWindow::setupUi() {
     resample_dil_spin_ = new QDoubleSpinBox(space_box);
     resample_dxl_spin_ = new QDoubleSpinBox(space_box);
     for (QDoubleSpinBox* spin : {resample_dil_spin_, resample_dxl_spin_}) {
+        setupSpin(spin);
         spin->setDecimals(0);
         spin->setRange(0.0, 1000000.0);
         spin->setEnabled(false);

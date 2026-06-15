@@ -1,6 +1,7 @@
 #include "DiscreteValueSpinBox.hpp"
 
 #include <QLineEdit>
+#include <QShowEvent>
 #include <QSignalBlocker>
 
 #include <algorithm>
@@ -8,12 +9,32 @@
 namespace kubik {
 
 namespace {
+
+constexpr int kSpinBoxButtonColumnWidth = 22;
+
+}  // namespace
+
+void ensureSpinBoxButtonSpace(QAbstractSpinBox* spin) {
+    if (!spin) {
+        return;
+    }
+    const QSize hint = spin->minimumSizeHint();
+    const int textW = spin->fontMetrics().horizontalAdvance(QStringLiteral("88888888")) + 12;
+    const int minW = std::max(hint.width(), textW + kSpinBoxButtonColumnWidth);
+    if (spin->minimumWidth() < minW) {
+        spin->setMinimumWidth(minW);
+    }
+    spin->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Fixed);
+}
+
+namespace {
 constexpr int kCommitDebounceMs = 500;
 }
 
 DiscreteValueSpinBox::DiscreteValueSpinBox(QWidget* parent) : QAbstractSpinBox(parent) {
     setButtonSymbols(QAbstractSpinBox::UpDownArrows);
-    setMinimumWidth(112);
+    setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Fixed);
+    ensureSpinBoxButtonSpace(this);
 
     debounce_timer_ = new QTimer(this);
     debounce_timer_->setSingleShot(true);
@@ -119,8 +140,15 @@ void DiscreteValueSpinBox::fixup(QString& input) const {
 
 QSize DiscreteValueSpinBox::minimumSizeHint() const {
     QSize hint = QAbstractSpinBox::minimumSizeHint();
-    hint.setWidth(std::max(hint.width(), 112));
+    const int textW = fontMetrics().horizontalAdvance(QStringLiteral("88888888")) + 12;
+    hint.setWidth(std::max(hint.width(), textW + kSpinBoxButtonColumnWidth));
     return hint;
+}
+
+void DiscreteValueSpinBox::showEvent(QShowEvent* event) {
+    QAbstractSpinBox::showEvent(event);
+    ensureSpinBoxButtonSpace(this);
+    refreshStepButtons();
 }
 
 #if QT_VERSION >= QT_VERSION_CHECK(5, 15, 0)
