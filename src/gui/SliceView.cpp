@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace {
 
@@ -195,6 +196,62 @@ void drawLeftIndexTicks(QPainter& p,
     }
 }
 
+bool isSampleCropped(int x,
+                     int y,
+                     int crop_h_min,
+                     int crop_h_max,
+                     int crop_v_min,
+                     int crop_v_max,
+                     bool crop_mask_entire) {
+    return crop_mask_entire || x < crop_h_min || x > crop_h_max || y < crop_v_min || y > crop_v_max;
+}
+
+/// Билинейная интерполяция амплитуды; NaN если любой из четырёх соседей в зоне кропа.
+float sampleBilinear(const std::vector<float>& data,
+                     int w,
+                     int h,
+                     double sx,
+                     double sy,
+                     int crop_h_min,
+                     int crop_h_max,
+                     int crop_v_min,
+                     int crop_v_max,
+                     bool crop_mask_entire) {
+    if (w <= 0 || h <= 0 || data.empty()) {
+        return std::numeric_limits<float>::quiet_NaN();
+    }
+
+    sx = std::clamp(sx, 0.0, static_cast<double>(w - 1));
+    sy = std::clamp(sy, 0.0, static_cast<double>(h - 1));
+
+    const int x0 = static_cast<int>(std::floor(sx));
+    const int y0 = static_cast<int>(std::floor(sy));
+    const int x1 = std::min(x0 + 1, w - 1);
+    const int y1 = std::min(y0 + 1, h - 1);
+
+    if (isSampleCropped(x0, y0, crop_h_min, crop_h_max, crop_v_min, crop_v_max, crop_mask_entire) ||
+        isSampleCropped(x1, y0, crop_h_min, crop_h_max, crop_v_min, crop_v_max, crop_mask_entire) ||
+        isSampleCropped(x0, y1, crop_h_min, crop_h_max, crop_v_min, crop_v_max, crop_mask_entire) ||
+        isSampleCropped(x1, y1, crop_h_min, crop_h_max, crop_v_min, crop_v_max, crop_mask_entire)) {
+        return std::numeric_limits<float>::quiet_NaN();
+    }
+
+    const float tx = static_cast<float>(sx - static_cast<double>(x0));
+    const float ty = static_cast<float>(sy - static_cast<double>(y0));
+    const float v00 = data[static_cast<std::size_t>(y0) * static_cast<std::size_t>(w) +
+                           static_cast<std::size_t>(x0)];
+    const float v10 = data[static_cast<std::size_t>(y0) * static_cast<std::size_t>(w) +
+                           static_cast<std::size_t>(x1)];
+    const float v01 = data[static_cast<std::size_t>(y1) * static_cast<std::size_t>(w) +
+                           static_cast<std::size_t>(x0)];
+    const float v11 = data[static_cast<std::size_t>(y1) * static_cast<std::size_t>(w) +
+                           static_cast<std::size_t>(x1)];
+
+    const float v0 = v00 + tx * (v10 - v00);
+    const float v1 = v01 + tx * (v11 - v01);
+    return v0 + ty * (v1 - v0);
+}
+
 }  // namespace
 
 namespace kubik {
@@ -357,25 +414,23 @@ void SliceView::paintEvent(QPaintEvent* event) {
     img.fill(QColor(96, 96, 100).rgb());
 
     const bool flip_il_vert = mode_ == SliceMode::Time;
+    const double x_scale = plot_w > 1 ? static_cast<double>(width_ - 1) / static_cast<double>(plot_w - 1)
+                                      : 0.0;
+    const double y_scale = plot_h > 1 ? static_cast<double>(height_ - 1) / static_cast<double>(plot_h - 1)
+                                      : 0.0;
     for (int iy = 0; iy < plot_h; ++iy) {
-        int src_y = std::min(
-            height_ - 1,
-            static_cast<int>(static_cast<double>(iy) / static_cast<double>(plot_h) * height_));
+        double src_y = plot_h > 1 ? static_cast<double>(iy) * y_scale : 0.0;
         if (flip_il_vert) {
-            src_y = height_ - 1 - src_y;
+            src_y = static_cast<double>(height_ - 1) - src_y;
         }
         for (int ix = 0; ix < plot_w; ++ix) {
-            const int src_x = std::min(
-                width_ - 1,
-                static_cast<int>(static_cast<double>(ix) / static_cast<double>(plot_w) * width_));
-            const bool cropped = crop_mask_entire_ || src_x < crop_h_min_ || src_x > crop_h_max_ ||
-                                 src_y < crop_v_min_ || src_y > crop_v_max_;
-            if (cropped) {
+            const double src_x = plot_w > 1 ? static_cast<double>(ix) * x_scale : 0.0;
+            const float v = sampleBilinear(data_, width_, height_, src_x, src_y, crop_h_min_, crop_h_max_,
+                                           crop_v_min_, crop_v_max_, crop_mask_entire_);
+            if (!std::isfinite(v)) {
                 img.setPixel(ix, iy, qRgb(0, 0, 0));
                 continue;
             }
-            const float v = data_[static_cast<std::size_t>(src_y) * static_cast<std::size_t>(width_) +
-                                 static_cast<std::size_t>(src_x)];
             const float cv = std::clamp(v, vmin_, vmax_);
             float norm = (cv - vmin_) / (vmax_ - vmin_);
             norm = std::clamp(norm, 0.0f, 1.0f);
