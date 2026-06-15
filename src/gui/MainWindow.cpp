@@ -120,9 +120,15 @@ void MainWindow::applyDarkTheme() {
 
 void MainWindow::setupUi() {
     auto* fileMenu = menuBar()->addMenu(tr("&Файл"));
-    auto* openAct = fileMenu->addAction(tr("&Открыть SEG-Y..."));
-    openAct->setShortcut(QKeySequence::Open);
-    connect(openAct, &QAction::triggered, this, &MainWindow::openFile);
+    auto* openLazyAct = fileMenu->addAction(tr("Открыть SEG-Y (с диска)..."));
+    openLazyAct->setShortcut(QKeySequence::Open);
+    openLazyAct->setStatusTip(tr("Быстрое открытие: срезы читаются с диска, clip по центральному inline"));
+    connect(openLazyAct, &QAction::triggered, this, &MainWindow::openFileLazy);
+
+    auto* openMemAct = fileMenu->addAction(tr("Открыть SEG-Y (в память)..."));
+    openMemAct->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_O));
+    openMemAct->setStatusTip(tr("Загрузить весь куб в RAM: быстрые срезы, особенно Time"));
+    connect(openMemAct, &QAction::triggered, this, &MainWindow::openFileInMemory);
 
     auto* saveAsAct = fileMenu->addAction(tr("Сохранить как..."));
     saveAsAct->setShortcut(QKeySequence::SaveAs);
@@ -424,12 +430,21 @@ void MainWindow::setupUi() {
     updateStatusBase();
 }
 
-void MainWindow::openFile() {
+void MainWindow::openFileLazy() {
     const QString path = QFileDialog::getOpenFileName(
-        this, tr("Открыть SEG-Y"), QString(),
+        this, tr("Открыть SEG-Y (с диска)"), QString(),
         tr("SEG-Y (*.sgy *.segy);;Все файлы (*)"));
     if (!path.isEmpty()) {
-        loadSegy(path);
+        loadSegy(path, CubeLoadMode::Lazy);
+    }
+}
+
+void MainWindow::openFileInMemory() {
+    const QString path = QFileDialog::getOpenFileName(
+        this, tr("Открыть SEG-Y (в память)"), QString(),
+        tr("SEG-Y (*.sgy *.segy);;Все файлы (*)"));
+    if (!path.isEmpty()) {
+        loadSegy(path, CubeLoadMode::InMemory);
     }
 }
 
@@ -556,13 +571,57 @@ void MainWindow::showCoordinates() {
     dlg->show();
 }
 
-void MainWindow::loadSegy(const QString& path) {
+void MainWindow::loadSegy(const QString& path, CubeLoadMode mode) {
+    CubeLoadOptions options;
+    options.mode = mode;
+
+    QProgressDialog progress(this);
+    progress.setWindowTitle(tr("Загрузка SEG-Y"));
+    progress.setLabelText(tr("Сканирование заголовков..."));
+    progress.setCancelButtonText(tr("Отмена"));
+    progress.setWindowModality(Qt::WindowModal);
+    progress.setMinimumDuration(0);
+    progress.setAutoClose(false);
+    progress.setAutoReset(false);
+    progress.setRange(0, 1);
+    progress.setValue(0);
+    progress.show();
+    QApplication::processEvents();
+
+    options.progress = [&](const CubeLoadProgress& info) -> bool {
+        QString stage;
+        switch (info.stage) {
+        case CubeLoadProgress::Stage::ScanHeaders:
+            stage = tr("Сканирование заголовков");
+            break;
+        case CubeLoadProgress::Stage::LoadVolume:
+            stage = tr("Загрузка куба в память");
+            break;
+        case CubeLoadProgress::Stage::BuildStats:
+            stage = tr("Статистика амплитуд");
+            break;
+        }
+        progress.setMaximum(std::max(1, info.total));
+        progress.setValue(std::min(info.current, info.total));
+        progress.setLabelText(tr("%1: %2 / %3").arg(stage).arg(info.current).arg(info.total));
+        QApplication::processEvents();
+        return !progress.wasCanceled();
+    };
+
     try {
-        cube_->load(path.toStdString());
+        cube_->load(path.toStdString(), options);
+    } catch (const LoadCanceled&) {
+        progress.close();
+        statusBar()->showMessage(tr("Загрузка отменена"), 3000);
+        return;
     } catch (const std::exception& ex) {
+        progress.close();
         QMessageBox::critical(this, tr("Ошибка"), QString::fromUtf8(ex.what()));
         return;
     }
+
+    progress.setValue(progress.maximum());
+    progress.close();
 
     const auto& g = cube_->geometry();
     il_idx_ = g.n_il / 2;
@@ -621,7 +680,9 @@ void MainWindow::loadSegy(const QString& path) {
     updateClipRangeLabel();
     setSliceMode(SliceMode::Inline);
     updateFilterToolState();
-    statusBar()->showMessage(tr("Загружен %1").arg(QFileInfo(path).fileName()), 3000);
+    const QString modeLabel =
+        (cube_->loadMode() == CubeLoadMode::InMemory) ? tr("в памяти") : tr("с диска");
+    statusBar()->showMessage(tr("Загружен %1 [%2]").arg(QFileInfo(path).fileName(), modeLabel), 5000);
 }
 
 void MainWindow::setSliceMode(SliceMode mode) {
@@ -1348,13 +1409,14 @@ void MainWindow::updateStatusBase() {
         sliceLabel = cube_->timeMs(t_idx_);
         break;
     }
-    base_status_ = tr("%1 %2 | IL×XL×T = %3×%4×%5 | dt %6 ms")
+    base_status_ = tr("%1 %2 | IL×XL×T = %3×%4×%5 | dt %6 ms | %7")
                        .arg(modeStr)
                        .arg(sliceLabel)
                        .arg(g.n_il)
                        .arg(g.n_xl)
                        .arg(g.n_t)
-                       .arg(g.dt_ms, 0, 'g', 4);
+                       .arg(g.dt_ms, 0, 'g', 4)
+                       .arg(cube_->loadMode() == CubeLoadMode::InMemory ? tr("RAM") : tr("диск"));
     if (status_label_) status_label_->setText(base_status_);
 }
 
@@ -1409,7 +1471,7 @@ void MainWindow::dropEvent(QDropEvent* event) {
     if (urls.isEmpty()) return;
     const QString path = urls.first().toLocalFile();
     if (!path.isEmpty()) {
-        loadSegy(path);
+        loadSegy(path, CubeLoadMode::Lazy);
     }
 }
 

@@ -34,7 +34,8 @@ protected:
     void keyPressEvent(QKeyEvent* event) override;
 
 private slots:
-    void openFile();
+    void openFileLazy();
+    void openFileInMemory();
     void saveFileAs();
     void showHeaders();
     void showCoordinates();
@@ -47,7 +48,7 @@ private slots:
 private:
     void setupUi();
     void applyDarkTheme();
-    void loadSegy(const QString& path);
+    void loadSegy(const QString& path, CubeLoadMode mode);
     void setSliceMode(SliceMode mode);
     void refreshSlice();
     void updateClipRangeLabel();

@@ -90,6 +90,40 @@ public:
     SaveCanceled() : std::runtime_error("save canceled") {}
 };
 
+/// Режим загрузки куба.
+enum class CubeLoadMode {
+    /// Срезы читаются с диска; clip по центральному inline (быстрое открытие).
+    Lazy,
+    /// Весь куб амплитуд в RAM; быстрые срезы, в т.ч. Time.
+    InMemory,
+};
+
+struct CubeLoadProgress {
+    enum class Stage {
+        ScanHeaders,
+        LoadVolume,
+        BuildStats,
+    };
+
+    Stage stage = Stage::ScanHeaders;
+    int current = 0;
+    int total = 1;
+};
+
+using CubeLoadProgressCallback = std::function<bool(const CubeLoadProgress&)>;
+
+struct CubeLoadOptions {
+    CubeLoadMode mode = CubeLoadMode::Lazy;
+    int inline_field = SEGY_TR_INLINE;
+    int crossline_field = SEGY_TR_CROSSLINE;
+    CubeLoadProgressCallback progress;
+};
+
+class LoadCanceled : public std::runtime_error {
+public:
+    LoadCanceled() : std::runtime_error("load canceled") {}
+};
+
 /// 3D post-stack куб из SEG-Y: скан заголовков, индекс IL×XL → trace id, чтение срезов.
 class SegyCube {
 public:
@@ -99,11 +133,11 @@ public:
     SegyCube(const SegyCube&) = delete;
     SegyCube& operator=(const SegyCube&) = delete;
 
-    void load(const std::string& path,
-              int inline_field = SEGY_TR_INLINE,
-              int crossline_field = SEGY_TR_CROSSLINE);
+    void load(const std::string& path, const CubeLoadOptions& options = {});
     void close();
     bool isLoaded() const { return loaded_; }
+    CubeLoadMode loadMode() const { return load_mode_; }
+    bool isInMemory() const { return !volume_.empty(); }
 
     const std::string& path() const { return path_; }
     const CubeGeometry& geometry() const { return geom_; }
@@ -145,7 +179,7 @@ public:
     std::vector<float> readTraceProcessed(int il_idx, int xl_idx, const CropBounds& crop,
                                           const ResampleParams& resample, float& out_dt_ms) const;
 
-    /// Перцентиль амплитуды по всему кубу (0…100, по знаковым значениям).
+    /// Перцентиль амплитуды (0…100): в RAM — по всему кубу, с диска — по центральному inline.
     float amplitudePercentile(float percentile) const;
     /// clip=99 → [p0.5, p99.5]; clip=95 → [p2.5, p97.5]; clip=1 → [p49.5, p50.5].
     void clipRange(float clip_percent, float& out_vmin, float& out_vmax) const;
@@ -162,7 +196,11 @@ public:
 
 private:
     int traceId(int il_idx, int xl_idx) const;
-    void buildAmplitudeLevels();
+    std::size_t volumeOffset(int il_idx, int xl_idx, int t_idx) const;
+    std::vector<float> readTraceAt(int il_idx, int xl_idx) const;
+    void loadVolumeToMemory(const CubeLoadProgressCallback& progress);
+    void buildAmplitudeStatsFromInline(int il_idx);
+    void buildAmplitudeStatsFromVolume();
 
     std::string path_;
     CubeGeometry geom_{};
@@ -172,7 +210,9 @@ private:
     std::vector<int32_t> trace_ids_;
     std::vector<double> cdp_x_;
     std::vector<double> cdp_y_;
+    std::vector<float> volume_;
     std::vector<float> amplitudes_sorted_;
+    CubeLoadMode load_mode_ = CubeLoadMode::Lazy;
     int sample_format_ = 0;
     int elemsize_ = 4;
     bool loaded_ = false;

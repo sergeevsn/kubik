@@ -146,6 +146,26 @@ int main(int argc, char** argv) {
         return 2;
     }
 
+    kubik::SegyCube cube_mem;
+    try {
+        kubik::CubeLoadOptions mem_opts;
+        mem_opts.mode = kubik::CubeLoadMode::InMemory;
+        cube_mem.load(path, mem_opts);
+    } catch (const std::exception& ex) {
+        std::fprintf(stderr, "FAIL: InMemory load: %s\n", ex.what());
+        return 2;
+    }
+    if (!cube_mem.isInMemory()) {
+        std::fprintf(stderr, "FAIL: InMemory mode did not load volume\n");
+        return 2;
+    }
+    const auto mem_il = cube_mem.readInlineSlice(il);
+    if (mem_il.size() != inline_slice.size() ||
+        sliceMaxAbs(mem_il) != sliceMaxAbs(inline_slice)) {
+        std::fprintf(stderr, "FAIL: InMemory inline slice mismatch\n");
+        return 2;
+    }
+
     int pos = 0, neg = 0;
     for (float v : inline_slice) {
         if (v > 0.f) {

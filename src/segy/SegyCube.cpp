@@ -3,6 +3,7 @@
 #include "kubik/Resample.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <climits>
 #include <cmath>
 #include <cstring>
@@ -200,14 +201,19 @@ void SegyCube::close() {
     trace_ids_.clear();
     cdp_x_.clear();
     cdp_y_.clear();
+    volume_.clear();
     amplitudes_sorted_.clear();
+    load_mode_ = CubeLoadMode::Lazy;
     sample_format_ = 0;
     elemsize_ = 4;
     loaded_ = false;
 }
 
-void SegyCube::load(const std::string& path, int inline_field, int crossline_field) {
+void SegyCube::load(const std::string& path, const CubeLoadOptions& options) {
     close();
+    load_mode_ = options.mode;
+    const int inline_field = options.inline_field;
+    const int crossline_field = options.crossline_field;
 
     segy_file* fp = segy_open(path.c_str(), "rb");
     if (!fp) {
@@ -278,6 +284,25 @@ void SegyCube::load(const std::string& path, int inline_field, int crossline_fie
     };
     std::vector<TraceMeta> meta(static_cast<std::size_t>(n_traces));
 
+    const CubeLoadProgressCallback& progress_cb = options.progress;
+    const int scan_progress_stride = std::max(1, n_traces / 200);
+    auto reportScanProgress = [&](int current) -> bool {
+        if (!progress_cb) {
+            return true;
+        }
+        CubeLoadProgress info;
+        info.stage = CubeLoadProgress::Stage::ScanHeaders;
+        info.current = current;
+        info.total = n_traces;
+        return progress_cb(info);
+    };
+    if (!reportScanProgress(0)) {
+        throw LoadCanceled();
+    }
+
+    std::atomic<bool> scan_canceled{false};
+    std::atomic<int> traces_scanned{0};
+
 #ifdef _OPENMP
 #pragma omp parallel
     {
@@ -293,39 +318,49 @@ void SegyCube::load(const std::string& path, int inline_field, int crossline_fie
 
 #pragma omp for schedule(static)
         for (int tr = 0; tr < n_traces; ++tr) {
+            if (scan_canceled.load(std::memory_order_relaxed)) {
+                continue;
+            }
+
             const std::uint64_t offset =
                 kSegyFileHeaderSize + static_cast<std::uint64_t>(tr) * full_trace_size;
             is.seekg(static_cast<std::streamoff>(offset), std::ios::beg);
             is.read(header_buf.data(), static_cast<std::streamsize>(kTraceHeaderSize));
-            if (!is) {
-                continue;
+            if (is) {
+                int32_t il = 0, xl = 0;
+                const bool ok_il = readTraceFieldIntRelaxed(header_buf.data(), inline_field, &il);
+                const bool ok_xl = readTraceFieldIntRelaxed(header_buf.data(), crossline_field, &xl);
+                if (ok_il && ok_xl) {
+                    TraceMeta tm;
+                    tm.il = il;
+                    tm.xl = xl;
+                    tm.ok = true;
+                    double cx = 0.0;
+                    double cy = 0.0;
+                    if (readTraceFieldDoubleRelaxed(header_buf.data(), SEGY_TR_CDP_X, &cx) &&
+                        readTraceFieldDoubleRelaxed(header_buf.data(), SEGY_TR_CDP_Y, &cy)) {
+                        tm.cdp_x = cx;
+                        tm.cdp_y = cy;
+                        tm.has_cdp = true;
+                    }
+                    meta[static_cast<std::size_t>(tr)] = tm;
+
+                    if (il < local_min_il) local_min_il = il;
+                    if (il > local_max_il) local_max_il = il;
+                    if (xl < local_min_xl) local_min_xl = xl;
+                    if (xl > local_max_xl) local_max_xl = xl;
+                }
             }
 
-            int32_t il = 0, xl = 0;
-            const bool ok_il = readTraceFieldIntRelaxed(header_buf.data(), inline_field, &il);
-            const bool ok_xl = readTraceFieldIntRelaxed(header_buf.data(), crossline_field, &xl);
-            if (!ok_il || !ok_xl) {
-                continue;
+            const int done = traces_scanned.fetch_add(1, std::memory_order_relaxed) + 1;
+            if (progress_cb && (done % scan_progress_stride == 0 || done == n_traces)) {
+#pragma omp critical(scan_progress)
+                {
+                    if (!scan_canceled.load(std::memory_order_relaxed) && !reportScanProgress(done)) {
+                        scan_canceled.store(true, std::memory_order_relaxed);
+                    }
+                }
             }
-
-            TraceMeta tm;
-            tm.il = il;
-            tm.xl = xl;
-            tm.ok = true;
-            double cx = 0.0;
-            double cy = 0.0;
-            if (readTraceFieldDoubleRelaxed(header_buf.data(), SEGY_TR_CDP_X, &cx) &&
-                readTraceFieldDoubleRelaxed(header_buf.data(), SEGY_TR_CDP_Y, &cy)) {
-                tm.cdp_x = cx;
-                tm.cdp_y = cy;
-                tm.has_cdp = true;
-            }
-            meta[static_cast<std::size_t>(tr)] = tm;
-
-            if (il < local_min_il) local_min_il = il;
-            if (il > local_max_il) local_max_il = il;
-            if (xl < local_min_xl) local_min_xl = xl;
-            if (xl > local_max_xl) local_max_xl = xl;
         }
 
 #pragma omp critical
@@ -352,33 +387,45 @@ void SegyCube::load(const std::string& path, int inline_field, int crossline_fie
                 kSegyFileHeaderSize + static_cast<std::uint64_t>(tr) * full_trace_size;
             is.seekg(static_cast<std::streamoff>(offset), std::ios::beg);
             is.read(header_buf.data(), static_cast<std::streamsize>(kTraceHeaderSize));
-            if (!is) {
-                continue;
+            if (is) {
+                int32_t il = 0, xl = 0;
+                if (readTraceFieldIntRelaxed(header_buf.data(), inline_field, &il) &&
+                    readTraceFieldIntRelaxed(header_buf.data(), crossline_field, &xl)) {
+                    TraceMeta& tm = meta[static_cast<std::size_t>(tr)];
+                    tm.il = il;
+                    tm.xl = xl;
+                    tm.ok = true;
+                    double cx = 0.0;
+                    double cy = 0.0;
+                    if (readTraceFieldDoubleRelaxed(header_buf.data(), SEGY_TR_CDP_X, &cx) &&
+                        readTraceFieldDoubleRelaxed(header_buf.data(), SEGY_TR_CDP_Y, &cy)) {
+                        tm.cdp_x = cx;
+                        tm.cdp_y = cy;
+                        tm.has_cdp = true;
+                    }
+                    min_il = std::min(min_il, il);
+                    max_il = std::max(max_il, il);
+                    min_xl = std::min(min_xl, xl);
+                    max_xl = std::max(max_xl, xl);
+                }
             }
-            int32_t il = 0, xl = 0;
-            if (!readTraceFieldIntRelaxed(header_buf.data(), inline_field, &il) ||
-                !readTraceFieldIntRelaxed(header_buf.data(), crossline_field, &xl)) {
-                continue;
+
+            const int done = tr + 1;
+            if (progress_cb && (done % scan_progress_stride == 0 || done == n_traces)) {
+                if (!reportScanProgress(done)) {
+                    throw LoadCanceled();
+                }
             }
-            TraceMeta& tm = meta[static_cast<std::size_t>(tr)];
-            tm.il = il;
-            tm.xl = xl;
-            tm.ok = true;
-            double cx = 0.0;
-            double cy = 0.0;
-            if (readTraceFieldDoubleRelaxed(header_buf.data(), SEGY_TR_CDP_X, &cx) &&
-                readTraceFieldDoubleRelaxed(header_buf.data(), SEGY_TR_CDP_Y, &cy)) {
-                tm.cdp_x = cx;
-                tm.cdp_y = cy;
-                tm.has_cdp = true;
-            }
-            min_il = std::min(min_il, il);
-            max_il = std::max(max_il, il);
-            min_xl = std::min(min_xl, xl);
-            max_xl = std::max(max_xl, xl);
         }
     }
 #endif
+
+    if (scan_canceled.load(std::memory_order_relaxed)) {
+        throw LoadCanceled();
+    }
+    if (!reportScanProgress(n_traces)) {
+        throw LoadCanceled();
+    }
 
     if (min_il > max_il || min_xl > max_xl) {
         throw std::runtime_error("SegyCube: cannot determine inline/crossline extent");
@@ -436,30 +483,90 @@ void SegyCube::load(const std::string& path, int inline_field, int crossline_fie
 
     path_ = path;
     loaded_ = true;
-    buildAmplitudeLevels();
+
+    switch (options.mode) {
+    case CubeLoadMode::Lazy: {
+        if (options.progress) {
+            CubeLoadProgress info;
+            info.stage = CubeLoadProgress::Stage::BuildStats;
+            info.current = 0;
+            info.total = 1;
+            if (!options.progress(info)) {
+                close();
+                throw LoadCanceled();
+            }
+        }
+        const int il_idx = std::max(0, geom_.n_il / 2);
+        buildAmplitudeStatsFromInline(il_idx);
+        break;
+    }
+    case CubeLoadMode::InMemory:
+        loadVolumeToMemory(options.progress);
+        buildAmplitudeStatsFromVolume();
+        break;
+    }
 }
 
-void SegyCube::buildAmplitudeLevels() {
-    amplitudes_sorted_.clear();
+std::size_t SegyCube::volumeOffset(int il_idx, int xl_idx, int t_idx) const {
+    return (static_cast<std::size_t>(il_idx) * static_cast<std::size_t>(geom_.n_xl) +
+            static_cast<std::size_t>(xl_idx)) *
+               static_cast<std::size_t>(geom_.n_t) +
+           static_cast<std::size_t>(t_idx);
+}
+
+std::vector<float> SegyCube::readTraceAt(int il_idx, int xl_idx) const {
+    const int nt = geom_.n_t;
+    if (!loaded_ || il_idx < 0 || xl_idx < 0 || il_idx >= geom_.n_il || xl_idx >= geom_.n_xl ||
+        nt <= 0) {
+        return {};
+    }
+
+    if (!volume_.empty()) {
+        const std::size_t base = volumeOffset(il_idx, xl_idx, 0);
+        return std::vector<float>(volume_.begin() + base, volume_.begin() + base + nt);
+    }
+
+    const int tid = traceId(il_idx, xl_idx);
+    if (tid < 0) {
+        return std::vector<float>(static_cast<std::size_t>(nt), 0.f);
+    }
+
+    segy_file* fp = openForReading(path_);
+    if (!fp) {
+        return std::vector<float>(static_cast<std::size_t>(nt), 0.f);
+    }
+    std::vector<float> samples = readTraceSamples(fp, tid, nt, sample_format_, elemsize_);
+    segy_close(fp);
+    return samples;
+}
+
+void SegyCube::loadVolumeToMemory(const CubeLoadProgressCallback& progress) {
     const int n_il = geom_.n_il;
     const int n_xl = geom_.n_xl;
     const int nt = geom_.n_t;
-    if (!loaded_ || n_il <= 0 || n_xl <= 0 || nt <= 0) {
+    if (n_il <= 0 || n_xl <= 0 || nt <= 0) {
         return;
     }
 
-#ifdef _OPENMP
-    const int n_threads = omp_get_max_threads();
-#else
-    const int n_threads = 1;
-#endif
-    std::vector<std::vector<float>> thread_bufs(static_cast<std::size_t>(n_threads));
+    const std::size_t vol_size =
+        static_cast<std::size_t>(n_il) * static_cast<std::size_t>(n_xl) * static_cast<std::size_t>(nt);
+    volume_.assign(vol_size, 0.f);
+
+    const int total = n_il * n_xl;
+    if (progress) {
+        CubeLoadProgress info;
+        info.stage = CubeLoadProgress::Stage::LoadVolume;
+        info.current = 0;
+        info.total = total;
+        if (!progress(info)) {
+            volume_.clear();
+            throw LoadCanceled();
+        }
+    }
 
 #ifdef _OPENMP
 #pragma omp parallel
     {
-        const int thread_id = omp_get_thread_num();
-        std::vector<float>& local = thread_bufs[static_cast<std::size_t>(thread_id)];
         segy_file* fp = openForReading(path_);
 #pragma omp for collapse(2) schedule(dynamic)
         for (int il = 0; il < n_il; ++il) {
@@ -470,11 +577,8 @@ void SegyCube::buildAmplitudeLevels() {
                 }
                 const std::vector<float> samples =
                     readTraceSamples(fp, tr, nt, sample_format_, elemsize_);
-                for (float v : samples) {
-                    if (std::isfinite(v)) {
-                        local.push_back(v);
-                    }
-                }
+                const std::size_t base = volumeOffset(il, xl, 0);
+                std::copy(samples.begin(), samples.end(), volume_.begin() + base);
             }
         }
         if (fp) {
@@ -484,18 +588,28 @@ void SegyCube::buildAmplitudeLevels() {
 #else
     {
         segy_file* fp = openForReading(path_);
-        std::vector<float>& local = thread_bufs[0];
+        int done = 0;
         for (int il = 0; il < n_il; ++il) {
             for (int xl = 0; xl < n_xl; ++xl) {
                 const int tr = traceId(il, xl);
-                if (tr < 0) {
-                    continue;
+                if (tr >= 0) {
+                    const std::vector<float> samples =
+                        readTraceSamples(fp, tr, nt, sample_format_, elemsize_);
+                    const std::size_t base = volumeOffset(il, xl, 0);
+                    std::copy(samples.begin(), samples.end(), volume_.begin() + base);
                 }
-                const std::vector<float> samples =
-                    readTraceSamples(fp, tr, nt, sample_format_, elemsize_);
-                for (float v : samples) {
-                    if (std::isfinite(v)) {
-                        local.push_back(v);
+                ++done;
+                if (progress && done % 64 == 0) {
+                    CubeLoadProgress info;
+                    info.stage = CubeLoadProgress::Stage::LoadVolume;
+                    info.current = done;
+                    info.total = total;
+                    if (!progress(info)) {
+                        if (fp) {
+                            segy_close(fp);
+                        }
+                        volume_.clear();
+                        throw LoadCanceled();
                     }
                 }
             }
@@ -506,13 +620,53 @@ void SegyCube::buildAmplitudeLevels() {
     }
 #endif
 
-    std::size_t total = 0;
-    for (const auto& buf : thread_bufs) {
-        total += buf.size();
+    if (progress) {
+        CubeLoadProgress info;
+        info.stage = CubeLoadProgress::Stage::LoadVolume;
+        info.current = total;
+        info.total = total;
+        if (!progress(info)) {
+            volume_.clear();
+            throw LoadCanceled();
+        }
+        info.stage = CubeLoadProgress::Stage::BuildStats;
+        info.current = 0;
+        info.total = 1;
+        if (!progress(info)) {
+            volume_.clear();
+            throw LoadCanceled();
+        }
     }
-    amplitudes_sorted_.reserve(total);
-    for (auto& buf : thread_bufs) {
-        amplitudes_sorted_.insert(amplitudes_sorted_.end(), buf.begin(), buf.end());
+}
+
+void SegyCube::buildAmplitudeStatsFromInline(int il_idx) {
+    amplitudes_sorted_.clear();
+    if (!loaded_ || geom_.n_t <= 0) {
+        return;
+    }
+
+    il_idx = std::clamp(il_idx, 0, std::max(0, geom_.n_il - 1));
+    const std::vector<float> slice = readInlineSlice(il_idx);
+    amplitudes_sorted_.reserve(slice.size());
+    for (float v : slice) {
+        if (std::isfinite(v)) {
+            amplitudes_sorted_.push_back(v);
+        }
+    }
+    std::sort(amplitudes_sorted_.begin(), amplitudes_sorted_.end());
+}
+
+void SegyCube::buildAmplitudeStatsFromVolume() {
+    amplitudes_sorted_.clear();
+    if (volume_.empty()) {
+        return;
+    }
+
+    amplitudes_sorted_.reserve(volume_.size());
+    for (float v : volume_) {
+        if (std::isfinite(v)) {
+            amplitudes_sorted_.push_back(v);
+        }
     }
     std::sort(amplitudes_sorted_.begin(), amplitudes_sorted_.end());
 }
@@ -593,6 +747,17 @@ std::vector<float> SegyCube::readInlineSlice(int il_idx) const {
     const int h = geom_.n_t;
     std::vector<float> slice(static_cast<std::size_t>(w) * static_cast<std::size_t>(h), 0.f);
 
+    if (!volume_.empty()) {
+        for (int xl = 0; xl < w; ++xl) {
+            const std::size_t base = volumeOffset(il_idx, xl, 0);
+            for (int t = 0; t < h; ++t) {
+                slice[static_cast<std::size_t>(t) * static_cast<std::size_t>(w) +
+                      static_cast<std::size_t>(xl)] = volume_[base + static_cast<std::size_t>(t)];
+            }
+        }
+        return slice;
+    }
+
 #ifdef _OPENMP
 #pragma omp parallel
     {
@@ -643,6 +808,17 @@ std::vector<float> SegyCube::readCrosslineSlice(int xl_idx) const {
     const int h = geom_.n_t;
     std::vector<float> slice(static_cast<std::size_t>(w) * static_cast<std::size_t>(h), 0.f);
 
+    if (!volume_.empty()) {
+        for (int il = 0; il < w; ++il) {
+            const std::size_t base = volumeOffset(il, xl_idx, 0);
+            for (int t = 0; t < h; ++t) {
+                slice[static_cast<std::size_t>(t) * static_cast<std::size_t>(w) +
+                      static_cast<std::size_t>(il)] = volume_[base + static_cast<std::size_t>(t)];
+            }
+        }
+        return slice;
+    }
+
 #ifdef _OPENMP
 #pragma omp parallel
     {
@@ -692,6 +868,16 @@ std::vector<float> SegyCube::readTimeSlice(int t_idx) const {
     const int w = geom_.n_xl;
     const int h = geom_.n_il;
     std::vector<float> slice(static_cast<std::size_t>(w) * static_cast<std::size_t>(h), 0.f);
+
+    if (!volume_.empty()) {
+        for (int il = 0; il < h; ++il) {
+            for (int xl = 0; xl < w; ++xl) {
+                slice[static_cast<std::size_t>(il) * static_cast<std::size_t>(w) +
+                      static_cast<std::size_t>(xl)] = volume_[volumeOffset(il, xl, t_idx)];
+            }
+        }
+        return slice;
+    }
 
 #ifdef _OPENMP
 #pragma omp parallel
@@ -923,17 +1109,14 @@ std::vector<float> SegyCube::readTraceProcessed(int il_idx, int xl_idx, const Cr
     }
 
     const int tid = traceId(il_idx, xl_idx);
-    if (tid < 0) {
+    if (tid < 0 && volume_.empty()) {
         return {};
     }
 
-    segy_file* fp = openForReading(path_);
-    if (!fp) {
+    const std::vector<float> trace = readTraceAt(il_idx, xl_idx);
+    if (trace.empty()) {
         return {};
     }
-    const std::vector<float> trace =
-        readTraceSamples(fp, tid, geom_.n_t, sample_format_, elemsize_);
-    segy_close(fp);
 
     const int t_lo = std::clamp(crop.t_min, 0, geom_.n_t - 1);
     const int t_hi = std::clamp(crop.t_max, 0, geom_.n_t - 1);
@@ -986,19 +1169,27 @@ void SegyCube::saveCropped(const std::string& out_path, const CropBounds& crop,
     if (!src) {
         throw std::runtime_error("SegyCube::saveCropped: cannot open source " + path_);
     }
+    const auto close_source = [&]() {
+        if (src) {
+            segy_close(src);
+            src = nullptr;
+        }
+    };
 
     segy_file* dst = segy_open(out_path.c_str(), "w+b");
     if (!dst) {
-        segy_close(src);
+        close_source();
         throw std::runtime_error("SegyCube::saveCropped: cannot create " + out_path);
     }
 
-    dst->metadata.encoding = src->metadata.encoding;
+    if (src) {
+        dst->metadata.encoding = src->metadata.encoding;
+    }
     dst->metadata.endianness = SEGY_MSB;
 
     if (segy_write_textheader(dst, 0, headers_.textual) != SEGY_OK) {
         segy_close(dst);
-        segy_close(src);
+        close_source();
         throw std::runtime_error("SegyCube::saveCropped: failed to write textual header");
     }
 
@@ -1012,7 +1203,7 @@ void SegyCube::saveCropped(const std::string& out_path, const CropBounds& crop,
     }
     if (n_t_out <= 0) {
         segy_close(dst);
-        segy_close(src);
+        close_source();
         throw std::runtime_error("SegyCube::saveCropped: empty time range after resample");
     }
 
@@ -1039,7 +1230,7 @@ void SegyCube::saveCropped(const std::string& out_path, const CropBounds& crop,
                                            fft_filter != nullptr, fft_filter2d != nullptr));
     auto cancelSave = [&]() {
         segy_close(dst);
-        segy_close(src);
+        close_source();
         throw SaveCanceled();
     };
     if (!tracker.advance(SaveCroppedProgress::Stage::Prepare, 1, 1)) {
@@ -1054,12 +1245,11 @@ void SegyCube::saveCropped(const std::string& out_path, const CropBounds& crop,
     for (int il_i = 0; il_i < n_il_crop; ++il_i) {
         for (int xl_i = 0; xl_i < n_xl_crop; ++xl_i) {
             const int tid = traceId(il_lo + il_i, xl_lo + xl_i);
-            if (tid < 0) {
+            if (tid < 0 && volume_.empty()) {
                 vol[static_cast<std::size_t>(il_i)][static_cast<std::size_t>(xl_i)].assign(
                     static_cast<std::size_t>(n_t_out), 0.f);
             } else {
-                const std::vector<float> tr =
-                    readTraceSamples(src, tid, geom_.n_t, sample_format_, elemsize_);
+                const std::vector<float> tr = readTraceAt(il_lo + il_i, xl_lo + xl_i);
                 int tr_out_n = 0;
                 vol[static_cast<std::size_t>(il_i)][static_cast<std::size_t>(xl_i)] =
                     resampleTrace1D(tr.data(), geom_.n_t, geom_.dt_ms, t_lo, t_hi, dt_out, tr_out_n);
@@ -1177,27 +1367,27 @@ void SegyCube::saveCropped(const std::string& out_path, const CropBounds& crop,
         segy_set_binfield_int(binary, SEGY_BIN_INTERVAL, interval_us) != SEGY_OK ||
         segy_set_binfield_int(binary, SEGY_BIN_FORMAT, SEGY_IEEE_FLOAT_4_BYTE) != SEGY_OK) {
         segy_close(dst);
-        segy_close(src);
+        close_source();
         throw std::runtime_error("SegyCube::saveCropped: failed to update binary header");
     }
 
     if (segy_write_binheader(dst, binary) != SEGY_OK) {
         segy_close(dst);
-        segy_close(src);
+        close_source();
         throw std::runtime_error("SegyCube::saveCropped: failed to write binary header");
     }
 
     unsigned long long trace0 = 0;
     if (segy_trace0(binary, &trace0, ext_text_headers) != SEGY_OK) {
         segy_close(dst);
-        segy_close(src);
+        close_source();
         throw std::runtime_error("SegyCube::saveCropped: failed to compute trace0");
     }
 
     int traceheader_count = 1;
     if (segy_traceheaders(binary, &traceheader_count) != SEGY_OK) {
         segy_close(dst);
-        segy_close(src);
+        close_source();
         throw std::runtime_error("SegyCube::saveCropped: failed to read trace header count");
     }
 
@@ -1219,7 +1409,7 @@ void SegyCube::saveCropped(const std::string& out_path, const CropBounds& crop,
     if (template_tid < 0 ||
         segy_read_standard_traceheader(src, template_tid, trace_hdr.data()) != SEGY_OK) {
         segy_close(dst);
-        segy_close(src);
+        close_source();
         throw std::runtime_error("SegyCube::saveCropped: failed to read template trace header");
     }
 
@@ -1232,7 +1422,7 @@ void SegyCube::saveCropped(const std::string& out_path, const CropBounds& crop,
                                           xl_out_labels[static_cast<std::size_t>(xl_o)]) != SEGY_OK ||
                 segy_set_tracefield_int(trace_hdr.data(), SEGY_TR_SAMPLE_COUNT, n_t_out) != SEGY_OK) {
                 segy_close(dst);
-                segy_close(src);
+                close_source();
                 throw std::runtime_error("SegyCube::saveCropped: failed to update trace header fields");
             }
 
@@ -1246,7 +1436,7 @@ void SegyCube::saveCropped(const std::string& out_path, const CropBounds& crop,
             const auto& samples = vol_out[static_cast<std::size_t>(il_o)][static_cast<std::size_t>(xl_o)];
             if (static_cast<int>(samples.size()) != n_t_out) {
                 segy_close(dst);
-                segy_close(src);
+                close_source();
                 throw std::runtime_error("SegyCube::saveCropped: internal sample count mismatch");
             }
             std::memcpy(sample_buf.data(), samples.data(),
@@ -1255,14 +1445,14 @@ void SegyCube::saveCropped(const std::string& out_path, const CropBounds& crop,
             if (segy_from_native(SEGY_IEEE_FLOAT_4_BYTE, static_cast<long long>(n_t_out),
                                  sample_buf.data()) != SEGY_OK) {
                 segy_close(dst);
-                segy_close(src);
+                close_source();
                 throw std::runtime_error("SegyCube::saveCropped: failed to encode IEEE samples");
             }
 
             if (segy_write_standard_traceheader(dst, out_trace, trace_hdr.data()) != SEGY_OK ||
                 segy_writetrace(dst, out_trace, sample_buf.data()) != SEGY_OK) {
                 segy_close(dst);
-                segy_close(src);
+                close_source();
                 throw std::runtime_error("SegyCube::saveCropped: failed to write trace " +
                                          std::to_string(out_trace));
             }
@@ -1278,7 +1468,7 @@ void SegyCube::saveCropped(const std::string& out_path, const CropBounds& crop,
 
     segy_flush(dst);
     segy_close(dst);
-    segy_close(src);
+    close_source();
 }
 
 namespace {
