@@ -39,6 +39,9 @@ private slots:
     void saveFileAs();
     void showHeaders();
     void showCoordinates();
+    void showAbout();
+    void showHelpLoading();
+    void showHelpTools();
     void onSliceScroll(int delta);
     void onNavigatorInline(int il_idx);
     void onNavigatorCrossline(int xl_idx);

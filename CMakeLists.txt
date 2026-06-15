@@ -74,6 +74,7 @@ add_executable(kubik
     src/gui/MainWindow.cpp
     src/gui/DiscreteValueSpinBox.cpp
     src/gui/SpinBoxFix.cpp
+    src/gui/HelpDialog.cpp
     src/gui/SegyHeaderDialog.cpp
     src/gui/SurveyCoordinatesDialog.cpp
     src/gui/SurveyMapWidget.cpp

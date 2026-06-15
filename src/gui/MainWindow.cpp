@@ -3,6 +3,7 @@
 #include "CubeNavigator.hpp"
 #include "FftFilter2DDialog.hpp"
 #include "FftFilterDialog.hpp"
+#include "HelpDialog.hpp"
 #include "DiscreteValueSpinBox.hpp"
 #include "SpinBoxFix.hpp"
 #include "SegyHeaderDialog.hpp"
@@ -163,6 +164,14 @@ void MainWindow::setupUi() {
 
     auto* coordsAct = infoMenu->addAction(tr("Координаты..."));
     connect(coordsAct, &QAction::triggered, this, &MainWindow::showCoordinates);
+
+    auto* helpMenu = menuBar()->addMenu(tr("&Помощь"));
+    auto* aboutAct = helpMenu->addAction(tr("О программе..."));
+    connect(aboutAct, &QAction::triggered, this, &MainWindow::showAbout);
+    auto* loadHelpAct = helpMenu->addAction(tr("Загрузка и просмотр кубов"));
+    connect(loadHelpAct, &QAction::triggered, this, &MainWindow::showHelpLoading);
+    auto* toolsHelpAct = helpMenu->addAction(tr("Инструменты"));
+    connect(toolsHelpAct, &QAction::triggered, this, &MainWindow::showHelpTools);
 
     auto* central = new QWidget(this);
     auto* root = new QHBoxLayout(central);
@@ -596,6 +605,74 @@ void MainWindow::showCoordinates() {
     auto* dlg = new SurveyCoordinatesDialog(*cube_, this);
     dlg->setAttribute(Qt::WA_DeleteOnClose);
     dlg->show();
+}
+
+void MainWindow::showAbout() {
+    QMessageBox::about(
+        this, tr("О программе Kubik"),
+        tr("<h3>Kubik 0.1</h3>"
+           "<p>Десктопное приложение для просмотра и обработки 3D post-stack кубов "
+           "в формате SEG-Y.</p>"
+           "<p><b>Основные возможности:</b></p>"
+           "<ul>"
+           "<li>загрузка кубов в память или с диска;</li>"
+           "<li>навигация по срезам Inline, Crossline и Time;</li>"
+           "<li>палитры, clip и подсветка области обрезки;</li>"
+           "<li>обрезка и ресемплинг по IL, XL и времени;</li>"
+           "<li>1D FFT-фильтрация на срезах IL/XL;</li>"
+           "<li>2D footprint-фильтрация на Time-срезах;</li>"
+           "<li>сохранение SEG-Y с учётом обработки;</li>"
+           "<li>просмотр заголовков и координат съёмки.</li>"
+           "</ul>"));
+}
+
+void MainWindow::showHelpLoading() {
+    HelpDialog::show(
+        this, tr("Загрузка и просмотр кубов"),
+        tr("<h3>Открытие SEG-Y</h3>"
+           "<p>Поддерживаются файлы <code>.sgy</code> и <code>.segy</code>.</p>"
+           "<p><b>Файл → Открыть SEG-Y (в память)</b> — весь куб амплитуд загружается "
+           "в RAM. Быстрые срезы, особенно Time. Если свободной памяти недостаточно, "
+           "программа автоматически откроет куб с диска.</p>"
+           "<p><b>Файл → Открыть SEG-Y (с диска)</b> — быстрое открытие: срезы читаются "
+           "по мере просмотра. Clip по амплитудам оценивается по центральному inline.</p>"
+           "<p>Перетаскивание файла из проводника в окно программы открывает куб "
+           "в режиме «в память» (с той же проверкой RAM).</p>"
+           "<h3>Просмотр срезов</h3>"
+           "<p>Кнопки <b>IL</b>, <b>XL</b>, <b>T</b> переключают режим среза. Горячие клавиши: "
+           "<b>I</b> — Inline, <b>X</b> — Crossline, <b>T</b> — Time.</p>"
+           "<p>Навигация: спинбокс «Срез», вертикальная полоса прокрутки, колесо мыши "
+           "на срезе, куб-навигатор справа.</p>"
+           "<p>Внизу окна — выбор палитры и clip (ширина диапазона отображения в %% "
+           "распределения амплитуд).</p>"
+           "<p>Меню <b>Инфо</b>: заголовки SEG-Y и координаты съёмки с картой CDP.</p>"));
+}
+
+void MainWindow::showHelpTools() {
+    HelpDialog::show(
+        this, tr("Инструменты"),
+        tr("<h3>Обрезка</h3>"
+           "<p>Панель <b>Обрезка</b> справа задаёт диапазон по inline, crossline и времени. "
+           "Чекбокс «Crop включён» применяет обрезку на срезах и при сохранении. "
+           "Область обрезки подсвечивается на срезе.</p>"
+           "<h3>Ресемплинг</h3>"
+           "<p>Панель <b>Ресемплинг</b> меняет шаг по времени (Δt) и пространственную сетку "
+           "(Δ Inline, Δ Crossline). Превью на срезах; при сохранении SEG-Y выходной куб "
+           "строится с новой сеткой.</p>"
+           "<h3>FFT-фильтрация</h3>"
+           "<p>Для срезов <b>Inline</b> и <b>Crossline</b>: 1D FFT по времени "
+           "(bandpass, low-pass, high-pass, notch, Butterworth).</p>"
+           "<p>Кнопка <b>Настройка</b> — выделите область на срезе, настройте фильтр "
+           "по спектру с превью до/после. <b>Apply To Cube</b> сохраняет параметры "
+           "для всех срезов IL/XL. Чекбокс «Фильтр включён» — применение при сохранении.</p>"
+           "<h3>Футпринты</h3>"
+           "<p>Для срезов <b>Time</b>: 2D footprint-фильтр в домене k_IL × k_XL "
+           "(режимы Footprint IL, XL, IL-XL).</p>"
+           "<p>Настройка аналогична FFT: выделение области, 2D-спектр, превью. "
+           "<b>Apply To Cube</b> — для всех Time-срезов; при сохранении — если фильтр включён.</p>"
+           "<h3>Сохранение</h3>"
+           "<p><b>Файл → Сохранить как…</b> — экспорт с учётом обрезки, ресемплинга "
+           "и активных фильтров (IEEE float, SEGY_BIN_FORMAT=5).</p>"));
 }
 
 CubeLoadMode MainWindow::resolveLoadMode(const QString& path, CubeLoadMode requested) const {
