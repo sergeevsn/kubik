@@ -713,11 +713,13 @@ void MainWindow::loadSegy(const QString& path, CubeLoadMode mode) {
     options.mode = effectiveMode;
 
     if (memoryFallback) {
-        qDebug().noquote() << "[kubik load] недостаточно RAM, переключение на режим «с диска»:"
+        qDebug().noquote() << "[kubik load] insufficient RAM, falling back to lazy (from disk):"
                            << path;
     }
-    qDebug().noquote() << "[kubik load] файл:" << path
-                       << "режим:" << (effectiveMode == CubeLoadMode::InMemory ? "в память" : "с диска");
+    qDebug().noquote() << "[kubik load] file:" << path
+                       << "mode:"
+                       << (effectiveMode == CubeLoadMode::InMemory ? "in memory"
+                                                                   : "lazy (from disk)");
 
     QProgressDialog progress(this);
     progress.setWindowTitle(tr("Загрузка SEG-Y"));
@@ -734,20 +736,24 @@ void MainWindow::loadSegy(const QString& path, CubeLoadMode mode) {
 
     options.progress = [&](const CubeLoadProgress& info) -> bool {
         QString stage;
+        const char* stage_debug = "";
         switch (info.stage) {
         case CubeLoadProgress::Stage::ScanHeaders:
             stage = tr("Сканирование заголовков");
+            stage_debug = "scanning headers";
             break;
         case CubeLoadProgress::Stage::LoadVolume:
             stage = tr("Загрузка куба в память");
+            stage_debug = "loading volume to memory";
             break;
         case CubeLoadProgress::Stage::BuildStats:
             stage = tr("Статистика амплитуд");
+            stage_debug = "building amplitude stats";
             break;
         }
         if (info.current == 0 || info.current >= info.total) {
-            qDebug().noquote() << QStringLiteral("[kubik load] прогресс: %1 %2 / %3")
-                                      .arg(stage)
+            qDebug().noquote() << QStringLiteral("[kubik load] progress: %1 %2 / %3")
+                                      .arg(QString::fromLatin1(stage_debug))
                                       .arg(info.current)
                                       .arg(info.total);
         }

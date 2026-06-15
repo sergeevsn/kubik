@@ -34,9 +34,9 @@ void loadDebug(const char* message) {
 const char* loadModeLabel(CubeLoadMode mode) {
     switch (mode) {
     case CubeLoadMode::Lazy:
-        return "с диска";
+        return "lazy (from disk)";
     case CubeLoadMode::InMemory:
-        return "в память";
+        return "in memory";
     }
     return "?";
 }
@@ -44,17 +44,17 @@ const char* loadModeLabel(CubeLoadMode mode) {
 const char* loadStageLabel(CubeLoadProgress::Stage stage) {
     switch (stage) {
     case CubeLoadProgress::Stage::ScanHeaders:
-        return "сканирование заголовков";
+        return "scanning headers";
     case CubeLoadProgress::Stage::LoadVolume:
-        return "загрузка куба в память";
+        return "loading volume to memory";
     case CubeLoadProgress::Stage::BuildStats:
-        return "статистика амплитуд";
+        return "building amplitude stats";
     }
     return "?";
 }
 
 void loadDebugStage(CubeLoadProgress::Stage stage) {
-    std::fprintf(stderr, "[kubik load] стадия: %s\n", loadStageLabel(stage));
+    std::fprintf(stderr, "[kubik load] stage: %s\n", loadStageLabel(stage));
     std::fflush(stderr);
 }
 
@@ -289,10 +289,10 @@ void SegyCube::load(const std::string& path, const CubeLoadOptions& options) {
     const int inline_field = options.inline_field;
     const int crossline_field = options.crossline_field;
 
-    std::fprintf(stderr, "[kubik load] открытие %s, режим: %s\n", path.c_str(),
+    std::fprintf(stderr, "[kubik load] opening %s, mode: %s\n", path.c_str(),
                  loadModeLabel(options.mode));
     std::fflush(stderr);
-    loadDebug("стадия: чтение текстового и бинарного заголовка");
+    loadDebug("stage: reading textual and binary header");
 
     segy_file* fp = segy_open(path.c_str(), "rb");
     if (!fp) {
@@ -351,7 +351,7 @@ void SegyCube::load(const std::string& path, const CubeLoadOptions& options) {
     segy_close(fp);
 
     std::fprintf(stderr,
-                 "[kubik load] метаданные: %d трасс, %d отсчётов, формат %d, dt=%.3f мс\n",
+                 "[kubik load] metadata: %d traces, %d samples, format %d, dt=%.3f ms\n",
                  n_traces, n_t, sample_format_, static_cast<double>(geom_.dt_ms));
     std::fflush(stderr);
     loadDebugStage(CubeLoadProgress::Stage::ScanHeaders);
@@ -511,10 +511,10 @@ void SegyCube::load(const std::string& path, const CubeLoadOptions& options) {
     if (!reportScanProgress(n_traces)) {
         throw LoadCanceled();
     }
-    std::fprintf(stderr, "[kubik load] сканирование заголовков: %d / %d\n", n_traces, n_traces);
+    std::fprintf(stderr, "[kubik load] header scan: %d / %d\n", n_traces, n_traces);
     std::fflush(stderr);
 
-    loadDebug("стадия: проверка INLINE/CROSSLINE");
+    loadDebug("stage: validating INLINE/CROSSLINE");
     {
         int valid_count = 0;
         int32_t min_il_val = INT_MAX;
@@ -565,7 +565,7 @@ void SegyCube::load(const std::string& path, const CubeLoadOptions& options) {
                 u8"); вероятно prestack, а не post-stack куб");
         }
     }
-    loadDebug("проверка INLINE/CROSSLINE: OK");
+    loadDebug("INLINE/CROSSLINE validation: OK");
 
     if (min_il > max_il || min_xl > max_xl) {
         throw std::runtime_error("SegyCube: cannot determine inline/crossline extent");
@@ -584,7 +584,7 @@ void SegyCube::load(const std::string& path, const CubeLoadOptions& options) {
         throw std::runtime_error("SegyCube: no traces with valid inline/crossline");
     }
 
-    loadDebug("стадия: построение индекса куба");
+    loadDebug("stage: building cube index");
     inlines_.assign(il_set.begin(), il_set.end());
     crosslines_.assign(xl_set.begin(), xl_set.end());
 
@@ -622,7 +622,7 @@ void SegyCube::load(const std::string& path, const CubeLoadOptions& options) {
         }
     }
 
-    std::fprintf(stderr, "[kubik load] геометрия: IL=%d (%d..%d), XL=%d (%d..%d), T=%d\n",
+    std::fprintf(stderr, "[kubik load] geometry: IL=%d (%d..%d), XL=%d (%d..%d), T=%d\n",
                  geom_.n_il, geom_.min_il, geom_.max_il, geom_.n_xl, geom_.min_xl, geom_.max_xl,
                  geom_.n_t);
     std::fflush(stderr);
@@ -632,7 +632,7 @@ void SegyCube::load(const std::string& path, const CubeLoadOptions& options) {
 
     switch (options.mode) {
     case CubeLoadMode::Lazy:
-        loadDebug("режим с диска: пропуск загрузки volume в RAM");
+        loadDebug("lazy mode: skipping volume load to RAM");
         break;
     case CubeLoadMode::InMemory:
         loadVolumeToMemory(options.progress);
@@ -652,7 +652,7 @@ void SegyCube::load(const std::string& path, const CubeLoadOptions& options) {
     }
     const int il_idx = std::max(0, geom_.n_il / 2);
     buildAmplitudeStatsFromInline(il_idx);
-    loadDebug("готово");
+    loadDebug("done");
 }
 
 std::size_t SegyCube::volumeOffset(int il_idx, int xl_idx, int t_idx) const {
@@ -697,7 +697,7 @@ void SegyCube::loadVolumeToMemory(const CubeLoadProgressCallback& progress) {
     }
 
     loadDebugStage(CubeLoadProgress::Stage::LoadVolume);
-    std::fprintf(stderr, "[kubik load] загрузка volume: %d × %d × %d отсчётов\n", n_il, n_xl, nt);
+    std::fprintf(stderr, "[kubik load] loading volume: %d x %d x %d samples\n", n_il, n_xl, nt);
     std::fflush(stderr);
 
     const std::size_t vol_size =
@@ -782,7 +782,7 @@ void SegyCube::loadVolumeToMemory(const CubeLoadProgressCallback& progress) {
             throw LoadCanceled();
         }
     }
-    std::fprintf(stderr, "[kubik load] загрузка куба в память: %d / %d\n", total, total);
+    std::fprintf(stderr, "[kubik load] loading volume to memory: %d / %d\n", total, total);
     std::fflush(stderr);
 }
 
@@ -793,7 +793,7 @@ void SegyCube::buildAmplitudeStatsFromInline(int il_idx) {
     }
 
     il_idx = std::clamp(il_idx, 0, std::max(0, geom_.n_il - 1));
-    std::fprintf(stderr, "[kubik load] статистика амплитуд: inline[%d] (label %d)\n", il_idx,
+    std::fprintf(stderr, "[kubik load] amplitude stats: inline[%d] (label %d)\n", il_idx,
                  inlineLabel(il_idx));
     std::fflush(stderr);
     const std::vector<float> slice = readInlineSlice(il_idx);
