@@ -441,8 +441,7 @@ void MainWindow::setupUi() {
     btn_footprint_select_ = new QPushButton(tr("Настройка"), footprint_body);
     btn_footprint_select_->setCheckable(true);
     btn_footprint_select_->setEnabled(false);
-    btn_footprint_select_->setToolTip(
-        tr("Клик по срезу — анализ всего среза; перетаскивание — выделенная область"));
+    btn_footprint_select_->setToolTip(tr("Сразу открыть настройку footprint для текущего time-среза"));
     footprint_layout->addWidget(btn_footprint_select_);
     connect(btn_footprint_select_, &QPushButton::toggled, this, &MainWindow::onFootprintSelectToggled);
 
@@ -1247,8 +1246,20 @@ void MainWindow::onFootprintSelectToggled(bool enabled) {
         btn_fft_select_->blockSignals(false);
     }
     if (slice_view_) {
-        slice_view_->setSelectionMode(enabled);
+        slice_view_->setSelectionMode(false);
     }
+    if (!enabled) {
+        return;
+    }
+    if (!cube_->isLoaded() || mode_ != SliceMode::Time) {
+        if (btn_footprint_select_ && btn_footprint_select_->isChecked()) {
+            btn_footprint_select_->blockSignals(true);
+            btn_footprint_select_->setChecked(false);
+            btn_footprint_select_->blockSignals(false);
+        }
+        return;
+    }
+    onFftRegionSelected(0, 0, 0, 0);
 }
 
 void MainWindow::onFftRegionSelected(int h0, int h1, int v0, int v1) {
