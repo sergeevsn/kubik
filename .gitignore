@@ -4,6 +4,7 @@ logs/
 results/
 tmp/
 build/
+build*/
 .DS_Store
 .env
 .env.local
