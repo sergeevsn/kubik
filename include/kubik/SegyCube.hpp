@@ -36,6 +36,11 @@ struct CropBounds {
     int t_max = 0;
 };
 
+struct MuteParams {
+    double top_ms = 0.0;
+    double bottom_ms = 0.0;
+};
+
 struct MinMaxMedian {
     double min_val = 0.0;
     double max_val = 0.0;
@@ -199,6 +204,7 @@ public:
                      const ResampleParams& resample = {},
                      const FftFilterParams* fft_filter = nullptr,
                      const FftFilter2DParams* fft_filter2d = nullptr,
+                     const MuteParams* mute = nullptr,
                      const SaveCroppedProgressCallback& progress = {}) const;
 
     /// Статистика координат съёмки (inline/crossline/CDP, азимут, углы).

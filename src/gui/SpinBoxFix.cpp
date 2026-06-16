@@ -113,6 +113,8 @@ void setupSpinBox(QAbstractSpinBox* spin) {
     if (!spin) {
         return;
     }
+    // Do not emit valueChanged on each typed character; apply after editing is committed.
+    spin->setKeyboardTracking(false);
     if (spin->findChild<QObject*>(QStringLiteral("kubik_spinbox_fix"), Qt::FindDirectChildrenOnly)) {
         return;
     }

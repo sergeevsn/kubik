@@ -109,6 +109,12 @@ QString formatBytes(std::uint64_t bytes) {
     return QString::number(bytes / 1024.0, 'f', 0) + QStringLiteral(" КБ");
 }
 
+bool sampleMuted(double t_ms, const MuteParams& mute) {
+    const double top_ms = std::max(0.0, mute.top_ms);
+    const double bottom_ms = std::max(0.0, mute.bottom_ms);
+    return t_ms <= top_ms || t_ms >= bottom_ms;
+}
+
 }  // namespace
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), cube_(std::make_unique<SegyCube>()) {
@@ -458,6 +464,44 @@ void MainWindow::setupUi() {
     footprint_layout->addWidget(footprint_cube_filter_label_);
 
     rightCol->addWidget(footprint_section, 0);
+
+    auto* mute_section = new CollapsibleGroupBox(tr("Мьютинг"), central);
+    mute_section->setExpanded(false);
+    auto* mute_body = mute_section->contentWidget();
+    auto* mute_layout = new QVBoxLayout(mute_body);
+    mute_layout->setContentsMargins(4, 0, 0, 4);
+    auto* mute_hint = new QLabel(
+        tr("Трассы обнуляются от 0 до верхнего мьютинга и от нижнего мьютинга до конца."), mute_body);
+    mute_hint->setWordWrap(true);
+    mute_layout->addWidget(mute_hint);
+    auto* mute_grid = new QGridLayout();
+    mute_top_spin_ = new QDoubleSpinBox(mute_body);
+    mute_bottom_spin_ = new QDoubleSpinBox(mute_body);
+    for (QDoubleSpinBox* spin : {mute_top_spin_, mute_bottom_spin_}) {
+        spin->setDecimals(1);
+        spin->setRange(0.0, 60000.0);
+        spin->setSingleStep(50.0);
+        setupSpin(spin);
+    }
+    mute_top_spin_->setValue(0.0);
+    mute_bottom_spin_->setValue(10000.0);
+    mute_grid->addWidget(new QLabel(tr("Мьютинг сверху, мс"), mute_body), 0, 0);
+    mute_grid->addWidget(mute_top_spin_, 0, 1);
+    mute_grid->addWidget(new QLabel(tr("Мьютинг снизу, мс"), mute_body), 1, 0);
+    mute_grid->addWidget(mute_bottom_spin_, 1, 1);
+    mute_layout->addLayout(mute_grid);
+    mute_enable_ = new QCheckBox(tr("Применять мьютинг"), mute_body);
+    mute_enable_->setEnabled(false);
+    mute_layout->addWidget(mute_enable_);
+    mute_cube_filter_label_ = new QLabel(tr("Мьютинг к кубу: нет"), mute_body);
+    mute_cube_filter_label_->setWordWrap(true);
+    mute_layout->addWidget(mute_cube_filter_label_);
+    rightCol->addWidget(mute_section, 0);
+    connect(mute_enable_, &QCheckBox::toggled, this, &MainWindow::onMuteEnableToggled);
+    connect(mute_top_spin_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, &MainWindow::onMuteParamsChanged);
+    connect(mute_bottom_spin_, qOverload<double>(&QDoubleSpinBox::valueChanged), this,
+            &MainWindow::onMuteParamsChanged);
+
     rightCol->addStretch(1);
 
     root->setSpacing(6);
@@ -573,7 +617,8 @@ void MainWindow::saveFileAs() {
             (cube_fft_params_set_ && cube_fft_enabled_) ? &cube_fft_params_ : nullptr;
         const FftFilter2DParams* footprint =
             (cube_footprint_params_set_ && cube_footprint_enabled_) ? &cube_footprint_params_ : nullptr;
-        cube_->saveCropped(path.toStdString(), currentCropBounds(), currentResampleParams(), fft, footprint,
+        const MuteParams* mute = cube_mute_enabled_ ? &cube_mute_params_ : nullptr;
+        cube_->saveCropped(path.toStdString(), currentCropBounds(), currentResampleParams(), fft, footprint, mute,
                            progress_cb);
     } catch (const SaveCanceled&) {
         progress.close();
@@ -804,6 +849,9 @@ void MainWindow::loadSegy(const QString& path, CubeLoadMode mode) {
     cube_footprint_params_set_ = false;
     cube_fft_enabled_ = false;
     cube_footprint_enabled_ = false;
+    cube_mute_enabled_ = false;
+    cube_mute_params_.top_ms = 0.0;
+    cube_mute_params_.bottom_ms = static_cast<double>(std::max(1, g.n_t - 1)) * static_cast<double>(g.dt_ms);
     if (fft_filter_enable_) {
         fft_filter_enable_->blockSignals(true);
         fft_filter_enable_->setChecked(false);
@@ -816,8 +864,27 @@ void MainWindow::loadSegy(const QString& path, CubeLoadMode mode) {
         footprint_filter_enable_->setEnabled(false);
         footprint_filter_enable_->blockSignals(false);
     }
+    if (mute_enable_) {
+        mute_enable_->blockSignals(true);
+        mute_enable_->setChecked(false);
+        mute_enable_->setEnabled(true);
+        mute_enable_->blockSignals(false);
+    }
+    if (mute_top_spin_) {
+        mute_top_spin_->blockSignals(true);
+        mute_top_spin_->setValue(cube_mute_params_.top_ms);
+        mute_top_spin_->blockSignals(false);
+    }
+    if (mute_bottom_spin_) {
+        mute_bottom_spin_->blockSignals(true);
+        mute_bottom_spin_->setValue(cube_mute_params_.bottom_ms);
+        mute_bottom_spin_->blockSignals(false);
+    }
     updateFftCubeFilterLabel();
     updateFootprintCubeFilterLabel();
+    if (mute_cube_filter_label_) {
+        mute_cube_filter_label_->setText(tr("Мьютинг к кубу: выкл"));
+    }
     updateStatusBase();
     updateClipRangeLabel();
     setSliceMode(SliceMode::Inline);
@@ -970,6 +1037,7 @@ void MainWindow::refreshSlice() {
 
     applyCubeFftFilter(data, w, h, vert_step_ms);
     applyCubeFft2DFilter(data, w, h, horiz_labels, vert_labels);
+    applyCubeMute(data, w, h, vert_is_time, vert_labels, vert_step_ms);
 
     float vmin = 0.f;
     float vmax = 0.f;
@@ -1219,6 +1287,9 @@ void MainWindow::updateFilterToolState() {
     if (footprint_filter_enable_) {
         footprint_filter_enable_->setEnabled(loaded && footprint_mode && cube_footprint_params_set_);
     }
+    if (mute_enable_) {
+        mute_enable_->setEnabled(loaded);
+    }
 
     const bool selection_active =
         (btn_fft_select_ && btn_fft_select_->isChecked()) ||
@@ -1385,6 +1456,48 @@ void MainWindow::onFootprintFilterEnableToggled(bool enabled) {
     refreshSlice();
 }
 
+void MainWindow::onMuteEnableToggled(bool enabled) {
+    cube_mute_enabled_ = enabled;
+    if (mute_cube_filter_label_) {
+        if (!enabled) {
+            mute_cube_filter_label_->setText(tr("Мьютинг к кубу: выкл"));
+        } else {
+            mute_cube_filter_label_->setText(
+                tr("Мьютинг к кубу: верх %1 мс, низ %2 мс")
+                    .arg(cube_mute_params_.top_ms, 0, 'f', 1)
+                    .arg(cube_mute_params_.bottom_ms, 0, 'f', 1));
+        }
+    }
+    refreshSlice();
+}
+
+void MainWindow::onMuteParamsChanged() {
+    if (!mute_top_spin_ || !mute_bottom_spin_) {
+        return;
+    }
+    double top = mute_top_spin_->value();
+    double bottom = mute_bottom_spin_->value();
+    if (bottom < top) {
+        mute_bottom_spin_->blockSignals(true);
+        mute_bottom_spin_->setValue(top);
+        mute_bottom_spin_->blockSignals(false);
+        bottom = top;
+    }
+    cube_mute_params_.top_ms = top;
+    cube_mute_params_.bottom_ms = bottom;
+    if (mute_cube_filter_label_) {
+        if (cube_mute_enabled_) {
+            mute_cube_filter_label_->setText(
+                tr("Мьютинг к кубу: верх %1 мс, низ %2 мс")
+                    .arg(cube_mute_params_.top_ms, 0, 'f', 1)
+                    .arg(cube_mute_params_.bottom_ms, 0, 'f', 1));
+        } else {
+            mute_cube_filter_label_->setText(tr("Мьютинг к кубу: выкл"));
+        }
+    }
+    refreshSlice();
+}
+
 void MainWindow::updateFftCubeFilterLabel() {
     if (!fft_cube_filter_label_) {
         return;
@@ -1498,6 +1611,36 @@ void MainWindow::applyCubeFft2DFilter(std::vector<float>& data, int w, int h,
     }
 
     data = filterSlice2D(data, w, h, d_xl, d_il, cube_footprint_params_);
+}
+
+void MainWindow::applyCubeMute(std::vector<float>& data, int w, int h, bool vert_is_time,
+                               const std::vector<int32_t>& vert_labels, float vert_step_ms) {
+    if (!cube_mute_enabled_ || !cube_->isLoaded() || data.empty() || w <= 0 || h <= 0) {
+        return;
+    }
+    if (mode_ == SliceMode::Time) {
+        const double t_ms = static_cast<double>(cube_->timeMs(t_idx_));
+        if (!sampleMuted(t_ms, cube_mute_params_)) {
+            return;
+        }
+        std::fill(data.begin(), data.end(), 0.f);
+        return;
+    }
+    if (!vert_is_time) {
+        return;
+    }
+    for (int y = 0; y < h; ++y) {
+        double t_ms = static_cast<double>(y) * static_cast<double>(vert_step_ms);
+        if (!vert_labels.empty() && y < static_cast<int>(vert_labels.size())) {
+            t_ms = static_cast<double>(vert_labels[static_cast<std::size_t>(y)]);
+        }
+        if (!sampleMuted(t_ms, cube_mute_params_)) {
+            continue;
+        }
+        for (int x = 0; x < w; ++x) {
+            data[static_cast<std::size_t>(y) * static_cast<std::size_t>(w) + static_cast<std::size_t>(x)] = 0.f;
+        }
+    }
 }
 
 void MainWindow::onCropChanged() {

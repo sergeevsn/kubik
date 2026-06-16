@@ -76,6 +76,8 @@ private:
     void onFootprintApplyToCube(const FftFilter2DParams& params);
     void onFftFilterEnableToggled(bool enabled);
     void onFootprintFilterEnableToggled(bool enabled);
+    void onMuteEnableToggled(bool enabled);
+    void onMuteParamsChanged();
     void updateFilterToolState();
     void updateFftCubeFilterLabel();
     void updateFootprintCubeFilterLabel();
@@ -83,6 +85,8 @@ private:
     void applyCubeFft2DFilter(std::vector<float>& data, int w, int h,
                               const std::vector<int32_t>& horiz_labels,
                               const std::vector<int32_t>& vert_labels);
+    void applyCubeMute(std::vector<float>& data, int w, int h, bool vert_is_time,
+                       const std::vector<int32_t>& vert_labels, float vert_step_ms);
     void updateStatusBase();
     void resetResampleSpinboxes();
     void updateResampleSpinboxes();
@@ -141,13 +145,19 @@ private:
     QPushButton* btn_footprint_select_ = nullptr;
     QCheckBox* footprint_filter_enable_ = nullptr;
     QLabel* footprint_cube_filter_label_ = nullptr;
+    QCheckBox* mute_enable_ = nullptr;
+    QDoubleSpinBox* mute_top_spin_ = nullptr;
+    QDoubleSpinBox* mute_bottom_spin_ = nullptr;
+    QLabel* mute_cube_filter_label_ = nullptr;
 
     bool cube_fft_params_set_ = false;
     bool cube_footprint_params_set_ = false;
     bool cube_fft_enabled_ = false;
     bool cube_footprint_enabled_ = false;
+    bool cube_mute_enabled_ = false;
     FftFilterParams cube_fft_params_{};
     FftFilter2DParams cube_footprint_params_{};
+    MuteParams cube_mute_params_{};
 
     QString base_status_;
 };

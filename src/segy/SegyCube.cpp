@@ -1200,6 +1200,7 @@ std::vector<float> SegyCube::readTraceProcessed(int il_idx, int xl_idx, const Cr
 void SegyCube::saveCropped(const std::string& out_path, const CropBounds& crop,
                            const ResampleParams& resample, const FftFilterParams* fft_filter,
                            const FftFilter2DParams* fft_filter2d,
+                           const MuteParams* mute,
                            const SaveCroppedProgressCallback& progress) const {
     if (!loaded_) {
         throw std::runtime_error("SegyCube::saveCropped: no cube loaded");
@@ -1424,6 +1425,23 @@ void SegyCube::saveCropped(const std::string& out_path, const CropBounds& crop,
             }
             if (!tracker.advance(SaveCroppedProgress::Stage::Fft2D, t + 1, n_t_out)) {
                 cancelSave();
+            }
+        }
+    }
+
+    if (mute != nullptr && n_t_out > 0) {
+        const double top_ms = std::max(0.0, mute->top_ms);
+        const double bottom_ms = std::max(0.0, mute->bottom_ms);
+        for (int il_o = 0; il_o < n_il_out; ++il_o) {
+            for (int xl_o = 0; xl_o < n_xl_out; ++xl_o) {
+                std::vector<float>& tr =
+                    vol_out[static_cast<std::size_t>(il_o)][static_cast<std::size_t>(xl_o)];
+                for (int t = 0; t < n_t_out; ++t) {
+                    const double t_ms = static_cast<double>(t) * static_cast<double>(dt_out);
+                    if (t_ms <= top_ms || t_ms >= bottom_ms) {
+                        tr[static_cast<std::size_t>(t)] = 0.f;
+                    }
+                }
             }
         }
     }
