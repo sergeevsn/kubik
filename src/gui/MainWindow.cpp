@@ -1305,8 +1305,8 @@ void MainWindow::onFftRegionSelected(int h0, int h1, int v0, int v1) {
             d_il = 1.0;
         }
 
-        auto* dlg = new FftFilter2DDialog(data, w, h, h0, h1, v0, v1, d_xl, d_il, color_map_, clip_percent_,
-                                          this);
+        auto* dlg = new FftFilter2DDialog(cube_.get(), t_idx_, crop, resample, data, w, h, d_xl, d_il, color_map_,
+                                          clip_percent_, this);
         connect(dlg, &FftFilter2DDialog::applyToCubeRequested, this, &MainWindow::onFootprintApplyToCube);
         dlg->setAttribute(Qt::WA_DeleteOnClose);
         dlg->show();
@@ -1434,27 +1434,16 @@ void MainWindow::updateFootprintCubeFilterLabel() {
         return;
     }
 
-    QString type_name;
-    switch (cube_footprint_params_.type) {
-    case FftFilter2DType::FootprintIlXl:
-        type_name = tr("Footprint IL-XL");
-        break;
-    case FftFilter2DType::FootprintIl:
-        type_name = tr("Footprint IL");
-        break;
-    case FftFilter2DType::FootprintXl:
-        type_name = tr("Footprint XL");
-        break;
-    }
-
     const QString state_note = cube_footprint_enabled_ ? tr(" (вкл)") : tr(" (выкл)");
     footprint_cube_filter_label_->setText(
-        tr("Фильтр к кубу: %1, k_pass %2, k_cut IL %3, k_cut XL %4, k_smooth %5%6")
-            .arg(type_name)
-            .arg(cube_footprint_params_.k_pass, 0, 'f', 4)
-            .arg(cube_footprint_params_.k_cut_il, 0, 'f', 4)
-            .arg(cube_footprint_params_.k_cut_xl, 0, 'f', 4)
-            .arg(cube_footprint_params_.k_smooth, 0, 'f', 4)
+        tr("Фильтр к кубу: ширина %1°, подавление %2, чувствит. %3, k-центр %4, avg %5, mask %6x%7%8")
+            .arg(cube_footprint_params_.notch_width_deg, 0, 'f', 1)
+            .arg(cube_footprint_params_.suppression, 0, 'f', 2)
+            .arg(cube_footprint_params_.sensitivity, 0, 'f', 2)
+            .arg(cube_footprint_params_.k_preserve, 0, 'f', 1)
+            .arg(cube_footprint_params_.avg_slice_count)
+            .arg(cube_footprint_params_.mask_w)
+            .arg(cube_footprint_params_.mask_h)
             .arg(state_note));
 }
 

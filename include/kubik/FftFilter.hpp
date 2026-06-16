@@ -42,21 +42,22 @@ std::vector<float> filterSlice1D(const std::vector<float>& slice, int w, int h, 
 
 double butterworthGainSquared(double f_hz, double fs_hz, const FftFilterParams& params);
 
-enum class FftFilter2DType {
-    FootprintIlXl,
-    FootprintIl,
-    FootprintXl,
-};
-
-/// 2D footprint-фильтр time-среза: широкая полоса вырезания [k_pass, k_cut) вдоль оси(ей).
 struct FftFilter2DParams {
-    FftFilter2DType type = FftFilter2DType::FootprintIlXl;
-    double k_cut_il = 0.05;
-    double k_cut_xl = 0.05;
-    double k_pass = 0.005;
-    /// Ширина косинусного сглаживания на каждом краю зоны вырезания (в единицах k).
-    /// При k_smooth >= (k_cut - k_pass) / 2 — один спад на всём интервале [k_pass, k_cut).
-    double k_smooth = 0.01;
+    /// Ширина азимутального notch (сигма, в градусах).
+    double notch_width_deg = 6.0;
+    /// Чувствительность детекции в std: mean + sensitivity * std.
+    double sensitivity = 2.0;
+    /// Сила подавления для обнаруженных направлений: 0..1.
+    double suppression = 1.0;
+    /// Радиус (в пикселях k-space) вокруг k=0, который всегда сохраняется.
+    double k_preserve = 5.0;
+    /// Число time-слайсов для осреднения спектра (окно вокруг текущего слайса).
+    int avg_slice_count = 50;
+
+    /// Предрассчитанная маска для применения к срезам и при сохранении куба.
+    int mask_w = 0;
+    int mask_h = 0;
+    std::vector<float> mask;
 };
 
 struct Spectrum2D {
@@ -70,8 +71,14 @@ struct Spectrum2D {
 /// 2D амплитудный спектр (|FFT|), оси k_XL (X) и k_IL (Y), fftshift.
 Spectrum2D computeSpectrum2D(const std::vector<float>& slice, int w, int h, double d_xl, double d_il);
 
-/// Коэффициент пропускания в точке (k_il, k_xl) для footprint-маски.
-double footprintGain2D(double k_il, double k_xl, const FftFilter2DParams& params);
+/// Построить footprint-маску по среднему 2D-спектру.
+/// Вход: avg_spec.amps — амплитуды |FFT| (fftshift) усреднённого time-окна.
+/// Выход: маска [0..1], размер w*h.
+std::vector<float> buildFootprintMask2D(const Spectrum2D& avg_spec, const FftFilter2DParams& params);
+
+/// Применить готовую маску к 2D time-срезу.
+std::vector<float> filterSlice2DWithMask(const std::vector<float>& slice, int w, int h,
+                                         const std::vector<float>& mask);
 
 std::vector<float> filterSlice2D(const std::vector<float>& slice, int w, int h, double d_xl, double d_il,
                                  const FftFilter2DParams& params);
